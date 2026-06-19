@@ -1,0 +1,338 @@
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from pydantic import BaseModel, Field, validator
+from typing import List, Literal, Optional, Dict, Any
+from openai import OpenAI
+import uuid
+import asyncio
+import httpx
+import logging
+import time
+from datetime import datetime
+from enum import Enum
+
+from config import OPENAI_API_KEY, CONTEXT_API_BASE
+from context import get_cached_context_fast
+
+logger = logging.getLogger(__name__)
+client = OpenAI(api_key=OPENAI_API_KEY)
+CONTEXT_API = CONTEXT_API_BASE
+
+router = APIRouter()
+
+# -----------------------------
+# Simplified Models for Maximum Output
+# -----------------------------
+
+class DifficultyLevel(str, Enum):
+    BEGINNER = "beginner"
+    EASY = "easy"
+    MEDIUM = "medium"
+    HARD = "hard"
+    EXPERT = "expert"
+
+class QuestionType(str, Enum):
+    MULTIPLE_CHOICE = "multiple_choice"
+
+class LearningObjective(str, Enum):
+    KNOWLEDGE = "knowledge"
+    COMPREHENSION = "comprehension"
+    APPLICATION = "application"
+    ANALYSIS = "analysis"
+
+# Streamlined Models
+class QuizRequest(BaseModel):
+    content: str = Field(..., min_length=10)
+    difficulty: Optional[DifficultyLevel] = DifficultyLevel.MEDIUM
+    question_types: Optional[List[QuestionType]] = [QuestionType.MULTIPLE_CHOICE]
+    user_id: Optional[str] = None
+    max_questions: int = Field(7, ge=5, le=7)  # Changed from 12, ge=8, le=15 to 7, ge=5, le=7
+    
+    @validator('content')
+    def validate_content(cls, v):
+        if len(v.strip()) < 10:
+            raise ValueError('Content must be at least 10 characters long')
+        return v.strip()
+
+# Simplified Question Model - Only Multiple Choice
+class QuizQuestion(BaseModel):
+    id: int
+    type: Literal["multiple_choice"]
+    question: str
+    options: List[str]
+    correct_answer: str
+    explanation: str
+
+# Simplified Response Model
+class QuizResponse(BaseModel):
+    quiz_id: str
+    questions: List[QuizQuestion]
+    total_questions: int
+    estimated_time_minutes: int
+
+# Response model for structured outputs parsing
+class QuizGenerationResponse(BaseModel):
+    questions: List[QuizQuestion]
+
+# -----------------------------
+# Enhanced GPT Prompt with Quality Examples
+# -----------------------------
+
+def build_system_prompt() -> str:
+    return """You are an expert quiz generator that creates high-quality educational multiple-choice questions. Create exactly 5-7 quiz questions that test deep understanding, not just memorization.
+
+QUALITY REQUIREMENTS:
+1. Test understanding, comprehension, and application - not just recall
+2. Include varying difficulty levels to appropriately challenge students
+3. Cover multiple learning objectives (knowledge, comprehension, application, analysis)
+4. Provide helpful explanations that teach additional concepts
+5. For multiple choice: create plausible distractors that test common misconceptions
+
+CRITICAL REQUIREMENTS:
+1. Return ONLY JSON data conforming to the schema, never the schema itself.
+2. Output ONLY valid JSON format with proper escaping.
+3. Use double quotes, escape internal quotes as \\\".
+4. Use \\n for line breaks within content.
+5. No trailing commas.
+
+Remember: Create questions that require students to think, analyze, and apply concepts rather than just memorize facts."""
+
+def build_user_prompt(
+    content: str,
+    difficulty: DifficultyLevel,
+    question_types: List[QuestionType],
+    max_questions: int,
+    user_weak_areas: List[str] = None
+) -> str:
+    
+    weak_areas_str = f" Focus extra attention on: {', '.join(user_weak_areas[:3])}" if user_weak_areas else ""
+    
+    return f"""Create {max_questions} high-quality multiple-choice quiz questions from this content.
+
+CONTENT:
+{content}
+
+REQUIREMENTS:
+- Difficulty: {difficulty.value}
+- Question Type: multiple_choice only
+- Test deep understanding, not just memorization{weak_areas_str}
+- Include questions that require analysis and application of concepts
+- For multiple choice questions, include the options array
+
+Create exactly {max_questions} multiple-choice questions that thoroughly test student understanding."""
+
+# -----------------------------
+# OpenAI call wrapper - Updated for GPT-5-nano
+# -----------------------------
+def _call_model_and_get_parsed(input_messages, max_tokens=6000):
+    return client.responses.parse(
+        model="gpt-4.1-nano",
+        input=input_messages,
+        text_format=QuizGenerationResponse,
+        reasoning={"effort": "low"},
+        instructions="Generate high-quality multiple-choice quiz questions that test deep understanding and application of concepts, not just memorization.",
+        max_output_tokens=max_tokens,
+    )
+
+# -----------------------------
+# JSON Example Payloads (only multiple choice)
+# -----------------------------
+
+ASSISTANT_EXAMPLE_JSON_1 = """{
+  "questions": [
+    {
+      "id": 1,
+      "type": "multiple_choice",
+      "question": "Which process directly produces the most ATP during cellular respiration?",
+      "options": ["Glycolysis", "Krebs Cycle", "Electron Transport Chain", "Fermentation"],
+      "correct_answer": "Electron Transport Chain",
+      "explanation": "The Electron Transport Chain produces approximately 32-34 ATP molecules through oxidative phosphorylation, which is far more than glycolysis (2 ATP) or the Krebs Cycle (2 ATP)."
+    }
+  ]
+}"""
+
+ASSISTANT_EXAMPLE_JSON_2 = """{
+  "questions": [
+    {
+      "id": 1,
+      "type": "multiple_choice",
+      "question": "Which of the following best describes the relationship between photosynthesis and cellular respiration?",
+      "options": [
+        "They are completely unrelated processes",
+        "They are opposite but complementary processes",
+        "Both produce glucose from sunlight",
+        "Both release carbon dioxide as their primary product"
+      ],
+      "correct_answer": "They are opposite but complementary processes",
+      "explanation": "Photosynthesis converts CO₂ and H₂O into glucose using light energy, while cellular respiration breaks down glucose into CO₂ and H₂O to release energy. They are complementary opposite processes."
+    }
+  ]
+}"""
+
+ASSISTANT_EXAMPLE_JSON_3 = """{
+  "questions": [
+    {
+      "id": 1,
+      "type": "multiple_choice",
+      "question": "What is the main function of mitochondria in cellular respiration?",
+      "options": [
+        "Store genetic information",
+        "Generate ATP through oxidative phosphorylation",
+        "Produce glucose using sunlight",
+        "Control cell division"
+      ],
+      "correct_answer": "Generate ATP through oxidative phosphorylation",
+      "explanation": "Mitochondria are the powerhouses of the cell, using oxygen to break down glucose and produce ATP through the electron transport chain and chemiosmosis."
+    }
+  ]
+}"""
+
+# -----------------------------
+# Optimized Question Generation - Updated
+# -----------------------------
+
+class QuestionGenerator:
+    @staticmethod
+    async def generate_questions(
+        content: str,
+        difficulty: DifficultyLevel,
+        question_types: List[QuestionType],
+        max_questions: int,
+        user_context: Dict[str, Any] = None
+    ) -> List[QuizQuestion]:
+        
+        try:
+            weak_areas = user_context.get('weak_areas', [])[:3] if user_context else []
+            
+            system_prompt = build_system_prompt()
+            user_prompt = build_user_prompt(
+                content, difficulty, question_types, max_questions, weak_areas
+            )
+
+            # Prepare messages with example structure
+            input_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_1},
+                {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_2},
+                {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_3},
+                {"role": "user", "content": user_prompt}
+            ]
+
+            response = _call_model_and_get_parsed(input_messages)
+
+            if getattr(response, "output_parsed", None) is None:
+                if hasattr(response, "refusal") and response.refusal:
+                    raise HTTPException(status_code=400, detail=response.refusal)
+                retry_msg = {
+                    "role": "user",
+                    "content": "Fix JSON only: If the previous response had any formatting or schema issues, return only the corrected quiz questions. Nothing else."
+                }
+                response = _call_model_and_get_parsed(input_messages + [retry_msg])
+                if getattr(response, "output_parsed", None) is None:
+                    raise HTTPException(status_code=500, detail="Model did not return valid parsed output after retry.")
+
+            questions = response.output_parsed.questions
+
+            if not (5 <= len(questions) <= 7):  # Changed from (7 <= len(questions) <= 15)
+                retry_msg = {
+                    "role": "user",
+                    "content": f"Fix JSON only: Must have {max_questions} questions. Return corrected JSON only."
+                }
+                response_retry = _call_model_and_get_parsed(input_messages + [retry_msg])
+                if getattr(response_retry, "output_parsed", None) is None:
+                    raise HTTPException(status_code=500, detail=f"Question count invalid ({len(questions)}). Retry failed.")
+                questions = response_retry.output_parsed.questions
+                if not (5 <= len(questions) <= 7):  # Changed from (7 <= len(questions) <= 15)
+                    raise HTTPException(status_code=500, detail=f"Question count invalid after retry ({len(questions)}).")
+
+            logger.info("Generated %d questions (requested %d)", len(questions), max_questions)
+            
+            return questions
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("Question generation failed (content=%d chars, max=%d)", len(content), max_questions)
+            raise HTTPException(status_code=500, detail=f"Question generation failed: {str(e)}")
+
+# -----------------------------
+# Simplified Logging
+# -----------------------------
+
+async def log_quiz_creation(user_id: str, topic: str, question_count: int):
+    if not user_id:
+        return
+    
+    try:
+        payload = {
+            "user_id": user_id,
+            "event": "quiz_generated",
+            "topic": topic,
+            "question_count": question_count,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            await http.post(f"{CONTEXT_API}/api/context/update", json=payload)
+
+    except Exception as e:
+        logger.warning("Quiz context log failed: %s", e)
+
+# -----------------------------
+# Utility Functions
+# -----------------------------
+
+def extract_user_id(request: Request, req: QuizRequest) -> Optional[str]:
+    user_info = getattr(request.state, "user", None)
+    if user_info and "sub" in user_info:
+        return user_info["sub"]
+    elif request.headers.get("x-user-id"):
+        return request.headers["x-user-id"]
+    elif req.user_id:
+        return req.user_id
+    return None
+
+# -----------------------------
+# Optimized API Route
+# -----------------------------
+
+@router.post("/generate", response_model=QuizResponse)
+async def create_quiz(
+    req: QuizRequest,
+    request: Request,
+    background_tasks: BackgroundTasks
+):
+    start_time = time.monotonic()
+
+    user_id = extract_user_id(request, req)
+    ctx_result = await get_cached_context_fast(user_id) if user_id else {}
+    user_context = ctx_result.get("context", {}) if user_id else {}
+    
+    questions = await QuestionGenerator.generate_questions(
+        content=req.content,
+        difficulty=req.difficulty,
+        question_types=req.question_types,
+        max_questions=req.max_questions,
+        user_context=user_context
+    )
+    
+    quiz_id = f"quiz_{uuid.uuid4().hex[:8]}"
+    estimated_time = len(questions) * 90  # 90 seconds per question average
+    
+    quiz_response = QuizResponse(
+        quiz_id=quiz_id,
+        questions=questions,
+        total_questions=len(questions),
+        estimated_time_minutes=estimated_time // 60
+    )
+    
+    if user_id:
+        background_tasks.add_task(
+            log_quiz_creation,
+            user_id,
+            user_context.get('current_topic', 'General'),
+            len(questions)
+        )
+    
+    logger.info("Quiz created in %.2fs: %d questions", time.monotonic() - start_time, len(questions))
+    
+    return quiz_response

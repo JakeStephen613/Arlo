@@ -1,0 +1,38 @@
+project_id = "tbgzqigehgjnzpfisrwg"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+enabled = true
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+api_url = "http://127.0.0.1:54321"
+
+[auth]
+enabled = true
+port = 54324
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = ["https://127.0.0.1:3000"]
+jwt_expiry = 3600
+external_email_enabled = true
+external_phone_enabled = true
+sms_provider = "twilio"
+external_sms_enabled = true
+enable_signup = true
+enable_email_confirmations = false
+enable_email_autoconfirm = false
+enable_sms_autoconfirm = false
+email_double_confirm_changes_enabled = true
+
+[functions.study-plan-generator]
+verify_jwt = false
