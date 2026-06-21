@@ -3,7 +3,7 @@
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from openai import OpenAI
+from app.services.llm import client
 import os
 import json
 from datetime import datetime
@@ -11,12 +11,10 @@ from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import logging
 
-from config import OPENAI_API_KEY
 
-client = OpenAI(api_key=OPENAI_API_KEY)
 
 # CRITICAL FIX: Import context function directly instead of HTTP calls
-from context import get_cached_context_fast
+from app.services.context import get_cached_context_fast
 
 # ---------------------------
 # Setup
@@ -257,7 +255,6 @@ async def call_gpt_structured(processed_context: dict) -> dict:
 
         # Make API call with structured outputs
         response = client.chat.completions.create(
-            model="gpt-4.1-nano",
             messages=messages,
             response_format={
                 "type": "json_schema",

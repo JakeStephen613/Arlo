@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 import jwt
 import logging
 
-from config import ALLOWED_ORIGINS, SUPABASE_JWT_SECRET, ENV, SUPABASE_URL
+from app.core.config import ALLOWED_ORIGINS, SUPABASE_JWT_SECRET, ENV, SUPABASE_URL
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,16 +52,16 @@ app.add_middleware(
 )
 
 # --- Modular routers ---
-from flashcard_generator import router as flashcard_router
-from quiz import router as quiz_router
-from study_session import router as study_session_router
-from chatbot import router as chatbot_router
-from review_sheet import router as review_router
-from feynman_feedback import router as feynman_router
-from blurting import router as blurting_router
-from context import router as context_router
-from pdf_parser import router as pdf_parser_router
-from teaching import router as teaching_router
+from app.routers.flashcards import router as flashcard_router
+from app.routers.quiz import router as quiz_router
+from app.routers.study_session import router as study_session_router
+from app.routers.chatbot import router as chatbot_router
+from app.routers.review_sheet import router as review_router
+from app.routers.feynman_feedback import router as feynman_router
+from app.routers.blurting import router as blurting_router
+from app.services.context import router as context_router
+from app.routers.pdf_parser import router as pdf_parser_router
+from app.routers.teaching import router as teaching_router
 
 # --- Include all routes ---
 app.include_router(flashcard_router, prefix="/api")

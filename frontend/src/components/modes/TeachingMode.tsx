@@ -9,29 +9,10 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import UniversalLoadingScreen from '@/components/common/loading/UniversalLoadingScreen';
 import TeachingSetup from './TeachingSetup';
-import YouTubeVideoCard from './YouTubeVideoCard';
 
 interface TeachingLesson {
   title: string;
   content: string | string[];
-}
-
-interface YouTubeVideo {
-  title: string;
-  video_id: string;
-  url: string;
-  thumbnail: string;
-  duration: string;
-  channel_title: string;
-  view_count: number;
-  published_at: string;
-  query_used: string;
-  relevant_segments: Array<{
-    start_time: string;
-    end_time: string;
-    topic: string;
-    relevance_score: number;
-  }>;
 }
 
 interface TeachingModeProps {
@@ -51,7 +32,6 @@ interface TeachingModeProps {
 const TeachingMode = ({ description, onComplete, onBack, techniqueName, technique, preloadedContent, isLastTechniqueOfSession = false }: TeachingModeProps) => {
   const { user, getAuthToken } = useAuth();
   const [lessons, setLessons] = useState<TeachingLesson[]>([]);
-  const [youtubeVideo, setYoutubeVideo] = useState<YouTubeVideo | null>(null);
   const [currentLessonIndex, setCurrentLessonIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -338,11 +318,6 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
         lessonData = response;
       }
 
-      // Store YouTube video data if present
-      if (response.youtube_video) {
-        setYoutubeVideo(response.youtube_video);
-      }
-      
       if (lessonData && lessonData.length > 0) {
         setLessons(lessonData);
       } else {
@@ -376,31 +351,18 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
     await loadTeachingContent();
   };
 
-  // Determine if we're showing video or lesson content
-  const totalContent = lessons.length + (youtubeVideo ? 1 : 0);
-  const isShowingVideo = youtubeVideo && currentLessonIndex >= lessons.length;
+  const totalContent = lessons.length;
   const isLastContent = currentLessonIndex === totalContent - 1;
-  const currentLesson = isShowingVideo ? null : lessons[currentLessonIndex];
+  const currentLesson = lessons[currentLessonIndex];
   const canGoBack = currentLessonIndex > 0;
   const progressPercentage = totalContent > 0 ? ((currentLessonIndex + 1) / totalContent) * 100 : 0;
 
   const handleNext = () => {
     if (isLastContent) {
-      onComplete({
-        teachingLessons: lessons,
-        youtubeVideo: youtubeVideo
-      });
+      onComplete({ teachingLessons: lessons });
     } else {
       setCurrentLessonIndex(prev => prev + 1);
     }
-  };
-
-  const handleSkipVideo = () => {
-    onComplete({
-      teachingLessons: lessons,
-      youtubeVideo: youtubeVideo,
-      videoSkipped: true
-    });
   };
 
   const handlePrevious = () => {
@@ -476,7 +438,7 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
         <div className="space-y-2">
           <div className="flex justify-between text-sm text-gray-600">
             <span>
-              {isShowingVideo ? 'Video Content' : `Lesson ${currentLessonIndex + 1}`} of {totalContent} {totalContent === 1 ? 'item' : 'items'}
+              Lesson {currentLessonIndex + 1} of {totalContent} {totalContent === 1 ? 'item' : 'items'}
             </span>
             <span>{Math.round(progressPercentage)}% Complete</span>
           </div>
@@ -485,14 +447,7 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
       )}
 
       {/* Content Display */}
-      {isShowingVideo && youtubeVideo ? (
-        <YouTubeVideoCard
-          video={youtubeVideo}
-          onNext={handleNext}
-          onSkip={handleSkipVideo}
-        />
-      ) : (
-        <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50">
+      <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50">
         <CardHeader>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
@@ -528,7 +483,6 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
               <span>{currentLessonIndex + 1} / {totalContent}</span>
             </div>
 
-            {/* Only show "Start Technique" button if it's the last technique of the session */}
             {(isLastContent && isLastTechniqueOfSession) ? (
               <Button
                 onClick={handleNext}
@@ -546,12 +500,11 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
                 <ChevronRight className="w-4 h-4" />
               </Button>
             ) : (
-              <div className="w-[130px]" /> // Spacer to maintain layout
+              <div className="w-[130px]" />
             )}
           </div>
         </CardContent>
       </Card>
-      )}
 
       {/* Back to Block Button */}
       {onBack && (

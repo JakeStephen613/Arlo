@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Literal, Dict, Any
 from datetime import datetime, timedelta, timezone
 import json
-from openai import OpenAI
+from app.services.llm import client
 import os
 from supabase import create_client, Client
 import requests
@@ -15,9 +15,8 @@ from dataclasses import dataclass
 import time
 import logging
 
-from config import OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE
+from app.core.config import SUPABASE_URL, SUPABASE_SERVICE_ROLE
 
-client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Configuration
 CONFIDENCE_DECAY_RATE = 0.95
@@ -497,7 +496,6 @@ Focus on identifying the 3 weakest concepts and current learning topic."""
         ]
         
         response = client.chat.completions.create(
-            model="gpt-4.1-nano",
             messages=messages,
             response_format={
                 "type": "json_schema",
