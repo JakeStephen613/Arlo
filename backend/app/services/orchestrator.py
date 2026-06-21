@@ -136,12 +136,7 @@ def create_session(
             mastery=0.0, uncertainty=1.0, streak=0, priority=1.0,
         )]
     elif not concepts:
-        fallback_name = "General Knowledge"
-        concept_id = ensure_concept(fallback_name)
-        concepts = [ConceptSnapshot(
-            concept_id=UUID(concept_id), name=fallback_name,
-            mastery=0.0, uncertainty=1.0, streak=0, priority=1.0,
-        )]
+        raise ValueError("No concepts available for session. Please specify a topic.")
 
     steps = _build_step_sequence(concepts, config, intent)
 

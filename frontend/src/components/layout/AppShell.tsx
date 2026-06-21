@@ -9,6 +9,7 @@ import {
   Menu,
   X,
   Command,
+  GraduationCap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { path: '/session', label: 'Session', icon: BookOpen },
   { path: '/library', label: 'Library', icon: Library },
   { path: '/progress', label: 'Progress', icon: BarChart3 },
+  { path: '/tutor', label: 'Tutor', icon: GraduationCap },
 ];
 
 export default function AppShell({ children }: AppShellProps) {

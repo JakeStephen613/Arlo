@@ -1,14 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   Check,
   X,
-  Lightbulb,
-  Brain,
   BookOpen,
   MessageSquare,
-  Pencil,
   Clock,
   Trophy,
   TrendingUp,
@@ -16,148 +13,106 @@ import {
   Send,
   RefreshCw,
   ChevronDown,
+  Layers,
+  Zap,
+  Brain,
+  Pencil,
+  RotateCcw,
 } from 'lucide-react';
-import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { apiPost, apiGet } from '@/lib/apiClient';
+import { apiPost } from '@/lib/apiClient';
 import { cn } from '@/lib/utils';
 
 // ── Types ────────────────────────────────────────────────────
 
-interface SessionStep {
-  step_number: number;
+interface StudyBlock {
+  id: string;
+  unit: string;
+  technique: string;
+  techniques: string[];
+  phase: string;
+  tool: string;
+  duration: number;
+  description: string;
+  position: number;
+}
+
+interface StudyPlan {
+  session_id: string;
+  topic: string;
+  total_duration: number;
+  pomodoro: string;
+  units_to_cover: string[];
+  techniques: string[];
+  blocks: StudyBlock[];
+}
+
+interface ExpandedSubBlock {
+  blockIndex: number;
+  mode: 'teach' | 'quiz' | 'flashcard' | 'feynman' | 'blurting';
+  block: StudyBlock;
+}
+
+type SessionPhase = 'input' | 'generating' | 'plan-review' | 'studying' | 'summary';
+
+interface BlockScore {
+  blockIndex: number;
   mode: string;
-  concept_id: string;
-  concept_name: string;
-  difficulty: string;
-  rationale: string;
-  completed: boolean;
-  score: number | null;
-  confidence_before: number | null;
+  score: number;
 }
-
-interface SessionPlan {
-  session_id: string;
-  user_id: string;
-  intent: string;
-  steps: SessionStep[];
-  current_step: number;
-  started_at: string;
-}
-
-interface SessionSummary {
-  session_id: string;
-  intent: string;
-  total_steps: number;
-  completed_steps: number;
-  concepts_practiced: string[];
-  improved: string[];
-  still_weak: string[];
-  scheduled_next: string[];
-  time_on_task_seconds: number;
-  average_score: number;
-}
-
-interface NextStepResponse {
-  step: SessionStep | null;
-  done: boolean;
-  summary: SessionSummary | null;
-}
-
-type SessionPhase = 'pick' | 'topic' | 'loading' | 'confidence' | 'step' | 'feedback' | 'summary';
-
-const SKIP_CONFIDENCE_MODES = ['teach', 'review', 'diagnose'];
 
 // ── Main Component ───────────────────────────────────────────
 
 export default function Session() {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const intent = searchParams.get('intent');
 
-  const [phase, setPhase] = useState<SessionPhase>(intent ? 'topic' : 'pick');
-  const [plan, setPlan] = useState<SessionPlan | null>(null);
-  const [currentStep, setCurrentStep] = useState<SessionStep | null>(null);
-  const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const [phase, setPhase] = useState<SessionPhase>('input');
   const [topic, setTopic] = useState('');
+  const [duration, setDuration] = useState(60);
+  const [plan, setPlan] = useState<StudyPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [score, setScore] = useState<number | null>(null);
-  const [confidence, setConfidence] = useState<number | null>(null);
-  const [completedSteps, setCompletedSteps] = useState<SessionStep[]>([]);
 
-  const advanceToStep = (step: SessionStep) => {
-    setCurrentStep(step);
-    setScore(null);
-    setConfidence(null);
-    if (SKIP_CONFIDENCE_MODES.includes(step.mode)) {
-      setPhase('step');
-    } else {
-      setPhase('confidence');
-    }
-  };
+  // Studying state
+  const [subBlocks, setSubBlocks] = useState<ExpandedSubBlock[]>([]);
+  const [currentSubBlockIndex, setCurrentSubBlockIndex] = useState(0);
+  const [scores, setScores] = useState<BlockScore[]>([]);
+  const [preloadedContent, setPreloadedContent] = useState<Record<string, boolean>>({});
 
-  const createSession = useCallback(async (sessionIntent: string, sessionTopic?: string) => {
-    setPhase('loading');
+  const generatePlan = async () => {
+    if (!topic.trim()) return;
+    setPhase('generating');
     setError(null);
     try {
-      const newPlan = await apiPost<SessionPlan>('/session/create', {
-        intent: sessionIntent,
-        topic: sessionTopic || undefined,
-      });
-      setPlan(newPlan);
-
-      const next = await apiGet<NextStepResponse>(`/session/${newPlan.session_id}/next`);
-      if (next.done) {
-        setSummary(next.summary);
-        setPhase('summary');
-      } else if (next.step) {
-        advanceToStep(next.step);
-      }
+      const result = await apiPost<StudyPlan>('/study-session', {
+        objective: topic,
+        duration,
+      }, 60000);
+      setPlan(result);
+      setPhase('plan-review');
     } catch (e: any) {
-      setError(e.message || 'Failed to create session');
-      setPhase('pick');
+      setError(e.message || 'Failed to generate study plan');
+      setPhase('input');
     }
-  }, []);
-
-  useEffect(() => {
-    if (intent && phase === 'topic') {
-      if (intent === 'quick_review') {
-        createSession(intent);
-      }
-    }
-  }, [intent, phase, createSession]);
-
-  const handleTopicSubmit = () => {
-    if (intent) createSession(intent, topic);
   };
 
-  const handleConfidenceSubmit = () => {
-    setPhase('step');
+  const startStudying = () => {
+    if (!plan) return;
+    const expanded = expandBlocks(plan.blocks);
+    setSubBlocks(expanded);
+    setCurrentSubBlockIndex(0);
+    setScores([]);
+    setPhase('studying');
   };
 
-  const handleStepComplete = async (stepScore: number) => {
-    if (!plan || !currentStep) return;
-    setScore(stepScore);
-    setPhase('feedback');
+  const handleSubBlockComplete = (score: number) => {
+    const current = subBlocks[currentSubBlockIndex];
+    setScores(prev => [...prev, { blockIndex: current.blockIndex, mode: current.mode, score }]);
 
-    try {
-      const next = await apiPost<NextStepResponse>(`/session/${plan.session_id}/submit`, {
-        score: stepScore,
-        confidence_before: confidence,
-      });
-
-      setCompletedSteps(prev => [...prev, { ...currentStep, score: stepScore, completed: true }]);
-
-      setTimeout(() => {
-        if (next.done) {
-          setSummary(next.summary);
-          setPhase('summary');
-        } else if (next.step) {
-          advanceToStep(next.step);
-        }
-      }, 1200);
-    } catch (e: any) {
-      setError(e.message);
+    const nextIndex = currentSubBlockIndex + 1;
+    if (nextIndex >= subBlocks.length) {
+      setPhase('summary');
+    } else {
+      setCurrentSubBlockIndex(nextIndex);
     }
   };
 
@@ -169,7 +124,7 @@ export default function Session() {
           <p className="text-foreground font-semibold text-lg">Something went wrong</p>
           <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{error}</p>
           <button
-            onClick={() => { setError(null); setPhase('pick'); }}
+            onClick={() => { setError(null); setPhase('input'); }}
             className="mt-6 rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           >
             Try again
@@ -181,140 +136,121 @@ export default function Session() {
 
   return (
     <div className="min-h-[70vh] flex flex-col">
-      {/* Progress bar for active session */}
-      {plan && phase !== 'summary' && phase !== 'pick' && (
-        <SessionProgressBar plan={plan} completedSteps={completedSteps} currentStep={currentStep} />
-      )}
-
-      <div className="flex-1 flex flex-col justify-center py-8">
-        {phase === 'pick' && <IntentPicker onSelect={(i) => { navigate(`/session?intent=${i}`, { replace: true }); setPhase('topic'); }} />}
-        {phase === 'topic' && intent && intent !== 'quick_review' && (
-          <TopicInput intent={intent} topic={topic} setTopic={setTopic} onSubmit={handleTopicSubmit} onSkip={() => createSession(intent)} />
-        )}
-        {phase === 'loading' && <LoadingState />}
-        {phase === 'confidence' && currentStep && (
-          <ConfidencePrompt step={currentStep} confidence={confidence} setConfidence={setConfidence} onSubmit={handleConfidenceSubmit} />
-        )}
-        {phase === 'step' && currentStep && plan && (
-          <StepView step={currentStep} plan={plan} onComplete={handleStepComplete} />
-        )}
-        {phase === 'feedback' && currentStep && score !== null && (
-          <FeedbackView step={currentStep} score={score} confidence={confidence} />
-        )}
-        {phase === 'summary' && summary && (
-          <SummaryView summary={summary} onContinue={() => navigate('/')} onAnother={() => { setPhase('pick'); setPlan(null); setSummary(null); setCompletedSteps([]); navigate('/session', { replace: true }); }} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Session Progress Bar ─────────────────────────────────────
-
-function SessionProgressBar({ plan, completedSteps, currentStep }: {
-  plan: SessionPlan;
-  completedSteps: SessionStep[];
-  currentStep: SessionStep | null;
-}) {
-  const done = completedSteps.length;
-  const total = Math.max(plan.steps.length, done + 1);
-  const pct = Math.min(100, total > 0 ? Math.round((done / total) * 100) : 0);
-
-  return (
-    <div className="mb-2">
-      <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-        <span>Step {Math.min(done + 1, total)} of {total}</span>
-        {currentStep && (
-          <span className="text-foreground font-medium">{currentStep.concept_name}</span>
-        )}
-      </div>
-      <div className="h-1 bg-secondary rounded-full overflow-hidden">
-        <div
-          className="h-full bg-primary rounded-full transition-all duration-500"
-          style={{ width: `${pct}%` }}
+      {phase === 'input' && (
+        <TopicInput
+          topic={topic}
+          setTopic={setTopic}
+          duration={duration}
+          setDuration={setDuration}
+          onSubmit={generatePlan}
         />
-      </div>
+      )}
+      {phase === 'generating' && <GeneratingState />}
+      {phase === 'plan-review' && plan && (
+        <PlanReview plan={plan} onStart={startStudying} onBack={() => setPhase('input')} />
+      )}
+      {phase === 'studying' && plan && subBlocks.length > 0 && (
+        <StudyingView
+          plan={plan}
+          subBlocks={subBlocks}
+          currentIndex={currentSubBlockIndex}
+          scores={scores}
+          onComplete={handleSubBlockComplete}
+        />
+      )}
+      {phase === 'summary' && plan && (
+        <SummaryView
+          plan={plan}
+          scores={scores}
+          onHome={() => navigate('/')}
+          onAnother={() => {
+            setPlan(null);
+            setSubBlocks([]);
+            setScores([]);
+            setTopic('');
+            setPhase('input');
+          }}
+        />
+      )}
     </div>
   );
 }
 
-// ── Intent Picker ────────────────────────────────────────────
+// ── Block Expansion ──────────────────────────────────────────
 
-const INTENTS = [
-  { id: 'quick_review', label: 'Quick Review', desc: '5-10 min — review due items and reinforce what you know.', icon: Clock, color: 'bg-forest-600' },
-  { id: 'learn_new', label: 'Learn Something New', desc: 'Pick a topic, get taught, then practice with retrieval exercises.', icon: Lightbulb, color: 'bg-forest-500' },
-  { id: 'deep_session', label: 'Deep Session', desc: 'Full adaptive arc — diagnose, teach, practice, assess, review.', icon: Brain, color: 'bg-forest-700' },
-  { id: 'exam_prep', label: 'Exam Prep', desc: 'Broad coverage with weak-area drilling before a test.', icon: BookOpen, color: 'bg-forest-800' },
-] as const;
-
-function IntentPicker({ onSelect }: { onSelect: (intent: string) => void }) {
-  return (
-    <div className="max-w-lg mx-auto w-full space-y-8">
-      <div className="text-center">
-        <h1 className="font-display text-3xl font-bold tracking-tight text-foreground">Start a session</h1>
-        <p className="text-muted-foreground mt-2">Choose how you want to study today.</p>
-      </div>
-      <div className="space-y-3">
-        {INTENTS.map(({ id, label, desc, icon: Icon, color }) => (
-          <button
-            key={id}
-            onClick={() => onSelect(id)}
-            className="w-full flex items-center gap-4 rounded-xl border bg-card p-5 text-left transition-all hover:border-primary/40 hover:shadow-card group"
-          >
-            <div className={cn('rounded-lg p-2.5', color)}>
-              <Icon className="w-5 h-5 text-white" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{label}</h3>
-              <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">{desc}</p>
-            </div>
-            <ArrowRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
+function expandBlocks(blocks: StudyBlock[]): ExpandedSubBlock[] {
+  const expanded: ExpandedSubBlock[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    // Teaching first
+    expanded.push({ blockIndex: i, mode: 'teach', block });
+    // Then each technique
+    for (const tech of block.techniques) {
+      const mode = tech as ExpandedSubBlock['mode'];
+      if (['quiz', 'flashcard', 'feynman', 'blurting'].includes(mode)) {
+        expanded.push({ blockIndex: i, mode, block });
+      }
+    }
+  }
+  return expanded;
 }
 
 // ── Topic Input ──────────────────────────────────────────────
 
-function TopicInput({ intent, topic, setTopic, onSubmit, onSkip }: {
-  intent: string;
+const DURATION_OPTIONS = [30, 60, 90, 120];
+
+function TopicInput({ topic, setTopic, duration, setDuration, onSubmit }: {
   topic: string;
   setTopic: (t: string) => void;
+  duration: number;
+  setDuration: (d: number) => void;
   onSubmit: () => void;
-  onSkip: () => void;
 }) {
-  const intentLabel = intent.replace(/_/g, ' ');
   return (
-    <div className="max-w-lg mx-auto w-full space-y-6">
-      <div className="text-center">
-        <Badge className="mb-3 capitalize bg-forest-600 text-white border-0">{intentLabel}</Badge>
-        <h2 className="font-display text-2xl font-bold tracking-tight">What do you want to study?</h2>
-        <p className="text-muted-foreground mt-2">Enter a topic, or skip to let Arlo choose based on your weak areas.</p>
-      </div>
-      <div className="space-y-3">
-        <input
-          type="text"
-          value={topic}
-          onChange={e => setTopic(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && topic.trim()) onSubmit(); }}
-          placeholder="e.g. Biology, Linear algebra, World War 2..."
-          className="w-full rounded-xl border-2 bg-card px-4 py-3.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors text-center text-lg"
-          autoFocus
-        />
-        <div className="flex gap-3">
+    <div className="flex-1 flex items-center justify-center py-8">
+      <div className="max-w-lg mx-auto w-full space-y-8">
+        <div className="text-center">
+          <h1 className="font-display text-3xl font-bold tracking-tight text-foreground">Start a study session</h1>
+          <p className="text-muted-foreground mt-2">Enter a topic and Arlo will build a structured curriculum for you.</p>
+        </div>
+
+        <div className="space-y-5">
+          <input
+            type="text"
+            value={topic}
+            onChange={e => setTopic(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && topic.trim()) onSubmit(); }}
+            placeholder="e.g. Cell Biology, Linear Algebra, World War 2..."
+            className="w-full rounded-xl border-2 bg-card px-4 py-3.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors text-center text-lg"
+            autoFocus
+          />
+
+          <div>
+            <p className="text-sm text-muted-foreground mb-2 text-center">Session duration</p>
+            <div className="flex gap-2 justify-center">
+              {DURATION_OPTIONS.map(d => (
+                <button
+                  key={d}
+                  onClick={() => setDuration(d)}
+                  className={cn(
+                    'rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                    duration === d
+                      ? 'bg-primary text-primary-foreground'
+                      : 'border bg-card text-muted-foreground hover:border-primary/30'
+                  )}
+                >
+                  {d} min
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button
-            onClick={onSkip}
-            className="flex-1 rounded-lg border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors"
+            onClick={onSubmit}
+            disabled={!topic.trim()}
+            className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
           >
-            Let Arlo decide
-          </button>
-          <button
-            onClick={topic.trim() ? onSubmit : onSkip}
-            className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            Start studying
+            Generate Study Plan
           </button>
         </div>
       </div>
@@ -322,94 +258,234 @@ function TopicInput({ intent, topic, setTopic, onSubmit, onSkip }: {
   );
 }
 
-// ── Loading ──────────────────────────────────────────────────
+// ── Generating State ─────────────────────────────────────────
 
-function LoadingState() {
-  return (
-    <div className="flex flex-col items-center justify-center animate-fade-in">
-      <div className="w-12 h-12 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
-      <p className="text-muted-foreground mt-5 font-medium">Building your session...</p>
-      <p className="text-xs text-muted-foreground mt-1">Analyzing your learning data</p>
-    </div>
-  );
-}
-
-// ── Confidence Prompt ────────────────────────────────────────
-
-const CONFIDENCE_LEVELS = [
-  { value: 0.2, label: 'No idea' },
-  { value: 0.4, label: 'Shaky' },
-  { value: 0.6, label: 'Okay' },
-  { value: 0.8, label: 'Confident' },
-  { value: 1.0, label: 'Know it well' },
+const GENERATING_MESSAGES = [
+  'Designing your curriculum...',
+  'Breaking down subtopics...',
+  'Planning your study blocks...',
+  'Choosing retrieval techniques...',
 ];
 
-function ConfidencePrompt({ step, confidence, setConfidence, onSubmit }: {
-  step: SessionStep;
-  confidence: number | null;
-  setConfidence: (c: number) => void;
-  onSubmit: () => void;
+function GeneratingState() {
+  const [msgIndex, setMsgIndex] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setMsgIndex(i => (i + 1) % GENERATING_MESSAGES.length), 2500);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center animate-fade-in">
+      <div className="w-12 h-12 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
+      <p className="text-muted-foreground mt-5 font-medium">{GENERATING_MESSAGES[msgIndex]}</p>
+    </div>
+  );
+}
+
+// ── Plan Review ──────────────────────────────────────────────
+
+const TECHNIQUE_ICONS: Record<string, typeof BookOpen> = {
+  quiz: Zap,
+  flashcard: Layers,
+  flashcards: Layers,
+  feynman: Brain,
+  blurting: Pencil,
+};
+
+function PlanReview({ plan, onStart, onBack }: {
+  plan: StudyPlan;
+  onStart: () => void;
+  onBack: () => void;
 }) {
   return (
-    <div className="max-w-md mx-auto w-full space-y-8 text-center animate-fade-in">
-      <div>
-        <Badge className="mb-3 capitalize bg-forest-600 text-white border-0">{step.mode}</Badge>
-        <h2 className="font-display text-2xl font-bold tracking-tight">{step.concept_name}</h2>
-        <p className="text-muted-foreground mt-2">How confident do you feel about this topic?</p>
-      </div>
+    <div className="flex-1 py-8">
+      <div className="max-w-2xl mx-auto w-full space-y-6">
+        <div className="text-center">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">{plan.topic}</h1>
+          <p className="text-muted-foreground mt-1">
+            {plan.blocks.length} blocks · {plan.total_duration} min · {plan.pomodoro} pomodoro
+          </p>
+        </div>
 
-      <div className="space-y-2">
-        {CONFIDENCE_LEVELS.map(({ value, label }) => (
-          <button
-            key={value}
-            onClick={() => { setConfidence(value); onSubmit(); }}
-            className={cn(
-              'w-full flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-all',
-              confidence === value
-                ? 'border-primary bg-primary/10 text-primary'
-                : 'bg-card text-foreground hover:border-primary/30'
-            )}
-          >
-            <span>{label}</span>
-            <div className="w-24 h-1.5 bg-secondary rounded-full overflow-hidden">
-              <div className="h-full bg-primary/60 rounded-full" style={{ width: `${value * 100}%` }} />
+        <div className="space-y-3">
+          {plan.blocks.map((block, i) => (
+            <div key={block.id} className="rounded-xl border bg-card p-5 space-y-2">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
+                    {i + 1}
+                  </span>
+                  <div>
+                    <h3 className="font-semibold text-foreground">{block.unit}</h3>
+                    <p className="text-xs text-muted-foreground">{block.duration} min</p>
+                  </div>
+                </div>
+                <div className="flex gap-1.5">
+                  {block.techniques.map(tech => {
+                    const Icon = TECHNIQUE_ICONS[tech] || BookOpen;
+                    return (
+                      <span key={tech} className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
+                        <Icon className="w-3 h-3" />
+                        {tech}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed pl-10">{block.description}</p>
             </div>
+          ))}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onBack}
+            className="flex-1 rounded-xl border-2 bg-card px-4 py-3.5 text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+          >
+            Back
           </button>
-        ))}
+          <button
+            onClick={onStart}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            Start Studying
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── Step View (mode UIs) ─────────────────────────────────────
+// ── Studying View (Sidebar + Content) ────────────────────────
 
-function StepView({ step, plan, onComplete }: {
-  step: SessionStep;
-  plan: SessionPlan;
+function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete }: {
+  plan: StudyPlan;
+  subBlocks: ExpandedSubBlock[];
+  currentIndex: number;
+  scores: BlockScore[];
   onComplete: (score: number) => void;
 }) {
-  switch (step.mode) {
+  const current = subBlocks[currentIndex];
+  const currentBlockIndex = current.blockIndex;
+  const preloadedRef = useRef<Set<string>>(new Set());
+
+  // Preload next block's teaching content
+  useEffect(() => {
+    const nextTeach = subBlocks.find((sb, i) => i > currentIndex && sb.mode === 'teach');
+    if (!nextTeach || preloadedRef.current.has(nextTeach.block.id)) return;
+    preloadedRef.current.add(nextTeach.block.id);
+
+    (async () => {
+      try {
+        const { data: { session } } = await (await import('@/integrations/supabase/client')).supabase.auth.getSession();
+        const base = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:10000'}/api`;
+        // Fire-and-forget: the browser caches the SSE connection warmup
+        // and the backend will have the response ready faster on next request
+        fetch(`${base}/teaching/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-user-id': session?.user?.id || '' },
+          body: JSON.stringify({
+            topic: `${nextTeach.block.unit}: ${nextTeach.block.description}`,
+            concept_name: nextTeach.block.unit,
+            difficulty: 'medium',
+          }),
+        }).catch(() => {});
+      } catch {}
+    })();
+  }, [currentIndex, subBlocks]);
+
+  // Which original blocks are complete
+  const completedBlocks = new Set<number>();
+  const blockMaxSubIndex: Record<number, number> = {};
+  subBlocks.forEach((sb, i) => {
+    blockMaxSubIndex[sb.blockIndex] = i;
+  });
+  for (const [bi, maxI] of Object.entries(blockMaxSubIndex)) {
+    if (currentIndex > Number(maxI)) completedBlocks.add(Number(bi));
+  }
+
+  // Progress
+  const progressPct = Math.round((currentIndex / subBlocks.length) * 100);
+
+  return (
+    <div className="flex-1 flex gap-6 py-4">
+      {/* Sidebar */}
+      <div className="hidden md:block w-56 shrink-0 space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Study Plan</p>
+        {plan.blocks.map((block, i) => {
+          const isDone = completedBlocks.has(i);
+          const isCurrent = i === currentBlockIndex;
+          return (
+            <div
+              key={block.id}
+              className={cn(
+                'rounded-lg px-3 py-2.5 text-sm transition-all border',
+                isCurrent && 'border-primary bg-primary/5 text-foreground font-medium',
+                isDone && !isCurrent && 'border-transparent bg-secondary/50 text-muted-foreground',
+                !isDone && !isCurrent && 'border-transparent text-muted-foreground'
+              )}
+            >
+              <div className="flex items-center gap-2">
+                {isDone ? (
+                  <Check className="w-4 h-4 text-green-500 shrink-0" />
+                ) : isCurrent ? (
+                  <div className="w-4 h-4 rounded-full border-2 border-primary shrink-0" />
+                ) : (
+                  <div className="w-4 h-4 rounded-full border border-muted-foreground/30 shrink-0" />
+                )}
+                <span className="truncate">{block.unit}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 min-w-0">
+        {/* Progress bar */}
+        <div className="mb-4">
+          <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
+            <span>Block {currentBlockIndex + 1} of {plan.blocks.length}</span>
+            <span>{current.block.unit}</span>
+          </div>
+          <div className="h-1 bg-secondary rounded-full overflow-hidden">
+            <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }} />
+          </div>
+        </div>
+
+        {/* Mode component */}
+        <ModeView subBlock={current} onComplete={onComplete} />
+      </div>
+    </div>
+  );
+}
+
+// ── Mode Router ──────────────────────────────────────────────
+
+function ModeView({ subBlock, onComplete }: {
+  subBlock: ExpandedSubBlock;
+  onComplete: (score: number) => void;
+}) {
+  switch (subBlock.mode) {
     case 'teach':
-      return <TeachingStep step={step} onComplete={onComplete} />;
+      return <TeachingStep block={subBlock.block} onComplete={onComplete} />;
     case 'quiz':
-    case 'diagnose':
-      return <QuizStep step={step} onComplete={onComplete} />;
+      return <QuizStep block={subBlock.block} onComplete={onComplete} />;
     case 'flashcard':
-      return <FlashcardStep step={step} onComplete={onComplete} />;
+      return <FlashcardStep block={subBlock.block} onComplete={onComplete} />;
     case 'feynman':
-      return <FeynmanStep step={step} onComplete={onComplete} />;
+      return <FeynmanStep block={subBlock.block} onComplete={onComplete} />;
     case 'blurting':
-      return <BlurtingStep step={step} onComplete={onComplete} />;
-    case 'review':
-      return <ReviewStep step={step} onComplete={onComplete} />;
+      return <BlurtingStep block={subBlock.block} onComplete={onComplete} />;
     default:
-      return <GenericStep step={step} onComplete={onComplete} />;
+      return <GenericStep block={subBlock.block} mode={subBlock.mode} onComplete={onComplete} />;
   }
 }
 
 // ── Teaching Step (streaming SSE) ────────────────────────────
 
-function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (score: number) => void }) {
+function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
   const [sections, setSections] = useState<string[]>([]);
   const [currentSection, setCurrentSection] = useState('');
   const [streaming, setStreaming] = useState(true);
@@ -420,7 +496,7 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
   const [followUp, setFollowUp] = useState('');
   const [followUpContent, setFollowUpContent] = useState('');
   const [followUpStreaming, setFollowUpStreaming] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -432,9 +508,19 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
         const res = await fetch(`${base}/teaching/stream`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-user-id': session?.user?.id || '' },
-          body: JSON.stringify({ topic: step.concept_name, concept_name: step.concept_name, difficulty: step.difficulty }),
+          body: JSON.stringify({
+            topic: `${block.unit}: ${block.description}`,
+            concept_name: block.unit,
+            difficulty: 'medium',
+          }),
           signal: ac.signal,
         });
+
+        if (!res.ok) {
+          setError(`Teaching generation failed (${res.status})`);
+          setStreaming(false);
+          return;
+        }
 
         const reader = res.body?.getReader();
         const decoder = new TextDecoder();
@@ -454,7 +540,6 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
               const evt = JSON.parse(line.slice(6));
               if (evt.type === 'token') {
                 fullText += evt.content;
-                // Parse sections on the fly
                 const cleaned = fullText.replace(/\[CHECK\].*?\[\/CHECK\]/gs, '|||CHECK|||');
                 const parts = cleaned.split(/\n\n+/).filter(p => p.trim() && p.trim() !== '|||CHECK|||');
                 const sectionTexts = parts.map(p => p.replace(/\|\|\|CHECK\|\|\|/g, '').trim()).filter(Boolean);
@@ -465,43 +550,43 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
                   setCurrentSection(sectionTexts[0] || '');
                 }
               } else if (evt.type === 'done') {
-                // Final parse
                 const checks = [...fullText.matchAll(/\[CHECK\](.*?)\[\/CHECK\]/gs)].map((m, i) => ({
                   question: m[1].trim(),
                   afterSection: i === 0 ? 2 : 5,
                 }));
                 setCheckQuestions(checks);
-
                 const cleaned = fullText.replace(/\[CHECK\].*?\[\/CHECK\]/gs, '');
                 const finalSections = cleaned.split(/\n\n+/).map(s => s.trim()).filter(Boolean);
                 setSections(finalSections);
                 setCurrentSection('');
                 setStreaming(false);
                 setVisibleSections(1);
+              } else if (evt.type === 'error') {
+                setError(evt.message || 'Streaming error');
+                setStreaming(false);
               }
             } catch {}
           }
         }
         setStreaming(false);
       } catch (e: any) {
-        if (e.name !== 'AbortError') setStreaming(false);
+        if (e.name !== 'AbortError') {
+          setError('Failed to load teaching content');
+          setStreaming(false);
+        }
       }
     })();
 
     return () => ac.abort();
-  }, [step.concept_name, step.difficulty]);
+  }, [block.id]);
 
-  // Auto-reveal first section when streaming finishes
   useEffect(() => {
     if (!streaming && visibleSections === 0 && sections.length > 0) {
       setVisibleSections(1);
     }
   }, [streaming, sections.length, visibleSections]);
 
-  const showMore = () => {
-    setVisibleSections(prev => Math.min(prev + 2, sections.length));
-  };
-
+  const showMore = () => setVisibleSections(prev => Math.min(prev + 2, sections.length));
   const allVisible = visibleSections >= sections.length;
 
   const handleCheckSubmit = async (idx: number) => {
@@ -511,7 +596,7 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
       const result = await apiPost<{ correct: boolean; score: number; explanation: string }>('/teaching/check', {
         question: q.question,
         user_answer: checkAnswers[idx],
-        concept_name: step.concept_name,
+        concept_name: block.unit,
       });
       setCheckResults(prev => ({ ...prev, [idx]: result }));
     } catch {
@@ -529,7 +614,7 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
       const res = await fetch(`${base}/teaching/followup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': session?.user?.id || '' },
-        body: JSON.stringify({ original_topic: step.concept_name, follow_up: followUp }),
+        body: JSON.stringify({ original_topic: block.unit, follow_up: followUp }),
       });
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
@@ -554,12 +639,31 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
     setFollowUp('');
   };
 
-  // Render a single check question inline
+  if (error) {
+    return (
+      <div className="max-w-lg mx-auto w-full text-center space-y-4 animate-fade-in">
+        <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
+        <p className="text-foreground font-semibold">{error}</p>
+        <button
+          onClick={() => { setError(null); setStreaming(true); setSections([]); setCurrentSection(''); }}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          <RotateCcw className="w-4 h-4" /> Retry
+        </button>
+        <button
+          onClick={() => onComplete(0.3)}
+          className="block mx-auto text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Skip this block
+        </button>
+      </div>
+    );
+  }
+
   const renderCheck = (idx: number) => {
     const q = checkQuestions[idx];
     if (!q) return null;
     const result = checkResults[idx];
-
     return (
       <div key={`check-${idx}`} className="rounded-xl border-2 border-forest-200 bg-forest-50 dark:border-forest-700 dark:bg-forest-900/30 p-5 space-y-3 animate-fade-in">
         <div className="flex items-center gap-2">
@@ -569,7 +673,6 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
           <p className="text-sm font-semibold text-foreground">Quick check</p>
         </div>
         <p className="text-foreground leading-relaxed">{q.question}</p>
-
         {!result ? (
           <div className="flex gap-2">
             <input
@@ -607,15 +710,13 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
 
   return (
     <div className="space-y-0 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <Badge className="bg-forest-600 text-white border-0 mb-1">Teaching</Badge>
-          <h2 className="font-display text-2xl font-bold tracking-tight">{step.concept_name}</h2>
+          <h2 className="font-display text-2xl font-bold tracking-tight">{block.unit}</h2>
         </div>
       </div>
 
-      {/* Streaming state */}
       {streaming && (
         <div className="rounded-xl border bg-card p-6 space-y-3">
           <div className="flex items-center gap-3">
@@ -629,7 +730,6 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
         </div>
       )}
 
-      {/* Sections revealed one at a time */}
       {!streaming && sections.length > 0 && (
         <div className="space-y-4">
           {sections.slice(0, visibleSections).map((section, i) => (
@@ -639,15 +739,10 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
                   {formatTeachingText(section)}
                 </div>
               </div>
-
-              {/* Show check question after relevant sections */}
-              {checkQuestions.map((cq, ci) =>
-                cq.afterSection === i ? renderCheck(ci) : null
-              )}
+              {checkQuestions.map((cq, ci) => cq.afterSection === i ? renderCheck(ci) : null)}
             </div>
           ))}
 
-          {/* Show more / continue */}
           {!allVisible ? (
             <button
               onClick={showMore}
@@ -658,13 +753,12 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
             </button>
           ) : (
             <div className="space-y-4">
-              {/* Follow-up input */}
               <div className="flex gap-2">
                 <input
                   value={followUp}
                   onChange={e => setFollowUp(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') handleFollowUp(); }}
-                  placeholder="Ask a follow-up or &quot;explain that differently&quot;..."
+                  placeholder='Ask a follow-up or "explain that differently"...'
                   className="flex-1 rounded-lg border bg-card px-4 py-3 text-sm focus:outline-none focus:border-primary transition-colors"
                 />
                 <button
@@ -693,14 +787,11 @@ function TeachingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
           )}
         </div>
       )}
-
-      <div ref={bottomRef} />
     </div>
   );
 }
 
 function formatTeachingText(text: string): string {
-  // Strip any markdown that leaked through
   return text
     .replace(/^#{1,3}\s+/gm, '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
@@ -711,7 +802,7 @@ function formatTeachingText(text: string): string {
 
 // ── Quiz Step ────────────────────────────────────────────────
 
-function QuizStep({ step, onComplete }: { step: SessionStep; onComplete: (score: number) => void }) {
+function QuizStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
   const [question, setQuestion] = useState('');
   const [options, setOptions] = useState<string[]>([]);
   const [correctAnswer, setCorrectAnswer] = useState('');
@@ -719,31 +810,34 @@ function QuizStep({ step, onComplete }: { step: SessionStep; onComplete: (score:
   const [selected, setSelected] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiPost<any>('/quiz/generate', {
-          content: `Create a multiple choice question to test understanding of ${step.concept_name}. The question should be specific and test real knowledge, not just ask "what do you know about X".`,
-          difficulty: step.difficulty,
-          concept_name: step.concept_name,
-          max_questions: 1,
-        }, 30000);
-        const q = res.questions?.[0];
-        if (q) {
-          setQuestion(q.question);
-          setOptions(q.options);
-          setCorrectAnswer(q.correct_answer);
-          setExplanation(q.explanation);
-        }
-      } catch {
-        setQuestion(`Which of the following best describes a key concept in ${step.concept_name}?`);
-        setOptions(['Option A', 'Option B', 'Option C', 'Option D']);
-        setCorrectAnswer('Option A');
+  const loadQuiz = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiPost<any>('/quiz/generate', {
+        content: `Create a multiple choice question to test understanding of ${block.unit}. Focus on: ${block.description}`,
+        difficulty: 'medium',
+        concept_name: block.unit,
+        max_questions: 1,
+      }, 30000);
+      const q = res.questions?.[0];
+      if (q) {
+        setQuestion(q.question);
+        setOptions(q.options);
+        setCorrectAnswer(q.correct_answer);
+        setExplanation(q.explanation);
+      } else {
+        setError('No question was generated');
       }
-      setLoading(false);
-    })();
-  }, [step.concept_name, step.difficulty]);
+    } catch {
+      setError('Quiz generation failed');
+    }
+    setLoading(false);
+  }, [block.unit, block.description]);
+
+  useEffect(() => { loadQuiz(); }, [loadQuiz]);
 
   const handleReveal = () => {
     setRevealed(true);
@@ -751,13 +845,34 @@ function QuizStep({ step, onComplete }: { step: SessionStep; onComplete: (score:
     setTimeout(() => onComplete(isCorrect ? 1.0 : 0.0), 2000);
   };
 
-  if (loading) return <LoadingState />;
+  if (loading) return <LoadingMode label="Generating quiz..." />;
+
+  if (error) {
+    return (
+      <div className="max-w-lg mx-auto w-full text-center space-y-4 animate-fade-in">
+        <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
+        <p className="text-foreground font-semibold">{error}</p>
+        <button
+          onClick={loadQuiz}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          <RotateCcw className="w-4 h-4" /> Retry
+        </button>
+        <button
+          onClick={() => onComplete(0)}
+          className="block mx-auto text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Skip
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-lg mx-auto w-full space-y-5 animate-fade-in">
       <div className="flex items-center gap-2 mb-2">
-        <Badge className="bg-forest-600 text-white border-0 capitalize">{step.mode === 'diagnose' ? 'Diagnostic' : 'Quiz'}</Badge>
-        <span className="text-sm text-muted-foreground">{step.concept_name}</span>
+        <Badge className="bg-forest-600 text-white border-0">Quiz</Badge>
+        <span className="text-sm text-muted-foreground">{block.unit}</span>
       </div>
 
       <div className="rounded-xl border-2 border-forest-200 dark:border-forest-700 bg-card p-6">
@@ -816,38 +931,66 @@ function QuizStep({ step, onComplete }: { step: SessionStep; onComplete: (score:
   );
 }
 
-// ── Flashcard Step ────────────────────────────────────────────
+// ── Flashcard Step ───────────────────────────────────────────
 
-function FlashcardStep({ step, onComplete }: { step: SessionStep; onComplete: (score: number) => void }) {
+function FlashcardStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
   const [front, setFront] = useState('');
   const [back, setBack] = useState('');
   const [flipped, setFlipped] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiPost<any>('/flashcards', {
-          content: `Create a flashcard about: ${step.concept_name}`,
-          concept_name: step.concept_name,
-        }, 20000);
-        const card = res.flashcards?.[0];
-        if (card) { setFront(card.front); setBack(card.back); }
-      } catch {
-        setFront(`What is ${step.concept_name}?`);
-        setBack('Think about the key definition and properties.');
+  const loadCard = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiPost<any>('/flashcards', {
+        content: `Create a flashcard about: ${block.unit}. Focus on: ${block.description}`,
+        concept_name: block.unit,
+      }, 20000);
+      const card = res.flashcards?.[0];
+      if (card) {
+        setFront(card.front);
+        setBack(card.back);
+      } else {
+        setError('No flashcard was generated');
       }
-      setLoading(false);
-    })();
-  }, [step.concept_name]);
+    } catch {
+      setError('Flashcard generation failed');
+    }
+    setLoading(false);
+  }, [block.unit, block.description]);
 
-  if (loading) return <LoadingState />;
+  useEffect(() => { loadCard(); }, [loadCard]);
+
+  if (loading) return <LoadingMode label="Creating flashcard..." />;
+
+  if (error) {
+    return (
+      <div className="max-w-lg mx-auto w-full text-center space-y-4 animate-fade-in">
+        <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
+        <p className="text-foreground font-semibold">{error}</p>
+        <button
+          onClick={loadCard}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          <RotateCcw className="w-4 h-4" /> Retry
+        </button>
+        <button
+          onClick={() => onComplete(0)}
+          className="block mx-auto text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Skip
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-lg mx-auto w-full space-y-5 animate-fade-in">
       <div className="flex items-center gap-2 mb-2">
         <Badge className="bg-forest-600 text-white border-0">Flashcard</Badge>
-        <span className="text-sm text-muted-foreground">{step.concept_name}</span>
+        <span className="text-sm text-muted-foreground">{block.unit}</span>
       </div>
 
       <button
@@ -860,9 +1003,7 @@ function FlashcardStep({ step, onComplete }: { step: SessionStep; onComplete: (s
         <p className="text-xl font-medium text-foreground leading-relaxed max-w-md">
           {flipped ? back : front}
         </p>
-        {!flipped && (
-          <p className="text-xs text-muted-foreground mt-6">Tap to reveal</p>
-        )}
+        {!flipped && <p className="text-xs text-muted-foreground mt-6">Tap to reveal</p>}
       </button>
 
       {flipped && (
@@ -870,7 +1011,7 @@ function FlashcardStep({ step, onComplete }: { step: SessionStep; onComplete: (s
           <p className="text-sm text-muted-foreground text-center">How well did you know this?</p>
           <div className="grid grid-cols-3 gap-2">
             {[
-              { label: 'Didn\'t know', score: 0, style: 'border-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-400' },
+              { label: "Didn't know", score: 0, style: 'border-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-400' },
               { label: 'Partially', score: 0.5, style: 'border-yellow-300 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400' },
               { label: 'Knew it', score: 1, style: 'border-green-300 hover:bg-green-50 dark:hover:bg-green-900/20 text-green-700 dark:text-green-400' },
             ].map(({ label, score, style }) => (
@@ -891,22 +1032,25 @@ function FlashcardStep({ step, onComplete }: { step: SessionStep; onComplete: (s
 
 // ── Feynman Step ─────────────────────────────────────────────
 
-function FeynmanStep({ step, onComplete }: { step: SessionStep; onComplete: (score: number) => void }) {
+function FeynmanStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
   const [explanation, setExplanation] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     if (!explanation.trim()) return;
     setSubmitting(true);
+    setError(null);
     try {
       const res = await apiPost<any>('/feynman/assess', {
-        question: `Explain ${step.concept_name} in your own words`,
+        question: `Explain ${block.unit} in your own words`,
         user_explanation: explanation,
-        concept_name: step.concept_name,
+        concept_name: block.unit,
       }, 20000);
       onComplete(res.score ?? 0.5);
     } catch {
-      onComplete(0.5);
+      setError('Failed to assess explanation');
+      setSubmitting(false);
     }
   };
 
@@ -914,11 +1058,11 @@ function FeynmanStep({ step, onComplete }: { step: SessionStep; onComplete: (sco
     <div className="max-w-lg mx-auto w-full space-y-5 animate-fade-in">
       <div className="flex items-center gap-2 mb-2">
         <Badge className="bg-forest-600 text-white border-0">Explain it</Badge>
-        <span className="text-sm text-muted-foreground">{step.concept_name}</span>
+        <span className="text-sm text-muted-foreground">{block.unit}</span>
       </div>
 
       <div className="rounded-xl border-2 border-forest-200 dark:border-forest-700 bg-card p-6">
-        <p className="text-foreground font-medium text-lg">Explain <span className="text-primary font-bold">{step.concept_name}</span> in your own words.</p>
+        <p className="text-foreground font-medium text-lg">Explain <span className="text-primary font-bold">{block.unit}</span> in your own words.</p>
         <p className="text-sm text-muted-foreground mt-2">Imagine you're teaching someone who has never heard of this before.</p>
       </div>
 
@@ -930,6 +1074,15 @@ function FeynmanStep({ step, onComplete }: { step: SessionStep; onComplete: (sco
         className="w-full rounded-xl border-2 bg-card px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors resize-none"
         autoFocus
       />
+
+      {error && (
+        <div className="flex items-center gap-2 text-sm text-destructive">
+          <AlertCircle className="w-4 h-4" />
+          <span>{error}</span>
+          <button onClick={handleSubmit} className="text-primary hover:underline ml-2">Retry</button>
+          <button onClick={() => onComplete(0.5)} className="text-muted-foreground hover:underline ml-2">Skip</button>
+        </div>
+      )}
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">{explanation.split(/\s+/).filter(Boolean).length} words</span>
@@ -948,22 +1101,25 @@ function FeynmanStep({ step, onComplete }: { step: SessionStep; onComplete: (sco
 
 // ── Blurting Step ────────────────────────────────────────────
 
-function BlurtingStep({ step, onComplete }: { step: SessionStep; onComplete: (score: number) => void }) {
+function BlurtingStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
   const [response, setResponse] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     if (!response.trim()) return;
     setSubmitting(true);
+    setError(null);
     try {
       const res = await apiPost<any>('/blurting/feedback', {
-        exercise_question: `Write everything you know about ${step.concept_name}`,
+        exercise_question: `Write everything you know about ${block.unit}`,
         blurted_response: response,
-        concept_name: step.concept_name,
+        concept_name: block.unit,
       }, 20000);
       onComplete(res.score ?? 0.5);
     } catch {
-      onComplete(0.5);
+      setError('Failed to assess response');
+      setSubmitting(false);
     }
   };
 
@@ -971,11 +1127,11 @@ function BlurtingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
     <div className="max-w-lg mx-auto w-full space-y-5 animate-fade-in">
       <div className="flex items-center gap-2 mb-2">
         <Badge className="bg-forest-600 text-white border-0">Recall</Badge>
-        <span className="text-sm text-muted-foreground">{step.concept_name}</span>
+        <span className="text-sm text-muted-foreground">{block.unit}</span>
       </div>
 
       <div className="rounded-xl border-2 border-forest-200 dark:border-forest-700 bg-card p-6">
-        <p className="text-foreground font-medium text-lg">Write everything you remember about <span className="text-primary font-bold">{step.concept_name}</span>.</p>
+        <p className="text-foreground font-medium text-lg">Write everything you remember about <span className="text-primary font-bold">{block.unit}</span>.</p>
         <p className="text-sm text-muted-foreground mt-2">No peeking — just write what comes to mind.</p>
       </div>
 
@@ -987,6 +1143,15 @@ function BlurtingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
         className="w-full rounded-xl border-2 bg-card px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors resize-none"
         autoFocus
       />
+
+      {error && (
+        <div className="flex items-center gap-2 text-sm text-destructive">
+          <AlertCircle className="w-4 h-4" />
+          <span>{error}</span>
+          <button onClick={handleSubmit} className="text-primary hover:underline ml-2">Retry</button>
+          <button onClick={() => onComplete(0.5)} className="text-muted-foreground hover:underline ml-2">Skip</button>
+        </div>
+      )}
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">{response.split(/\s+/).filter(Boolean).length} words</span>
@@ -1003,36 +1168,14 @@ function BlurtingStep({ step, onComplete }: { step: SessionStep; onComplete: (sc
   );
 }
 
-// ── Review Step ──────────────────────────────────────────────
+// ── Generic Step (fallback) ─────────────────────────────────
 
-function ReviewStep({ step, onComplete }: { step: SessionStep; onComplete: (score: number) => void }) {
-  return (
-    <div className="max-w-md mx-auto w-full text-center space-y-6 animate-fade-in">
-      <div className="w-16 h-16 rounded-2xl bg-forest-600 flex items-center justify-center mx-auto">
-        <TrendingUp className="w-8 h-8 text-white" />
-      </div>
-      <h2 className="font-display text-2xl font-bold">Session review</h2>
-      <p className="text-muted-foreground leading-relaxed">
-        Take a moment to reflect. What felt clearest? What still feels fuzzy?
-      </p>
-      <button
-        onClick={() => onComplete(0.7)}
-        className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-      >
-        Finish session
-      </button>
-    </div>
-  );
-}
-
-// ── Generic fallback Step ────────────────────────────────────
-
-function GenericStep({ step, onComplete }: { step: SessionStep; onComplete: (score: number) => void }) {
+function GenericStep({ block, mode, onComplete }: { block: StudyBlock; mode: string; onComplete: (score: number) => void }) {
   return (
     <div className="max-w-md mx-auto w-full text-center space-y-5 animate-fade-in">
-      <Badge className="bg-forest-600 text-white border-0 capitalize">{step.mode}</Badge>
-      <h2 className="font-semibold text-foreground text-xl">{step.concept_name}</h2>
-      <p className="text-sm text-muted-foreground">{step.rationale}</p>
+      <Badge className="bg-forest-600 text-white border-0 capitalize">{mode}</Badge>
+      <h2 className="font-semibold text-foreground text-xl">{block.unit}</h2>
+      <p className="text-sm text-muted-foreground">{block.description}</p>
       <button
         onClick={() => onComplete(0.5)}
         className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -1043,129 +1186,101 @@ function GenericStep({ step, onComplete }: { step: SessionStep; onComplete: (sco
   );
 }
 
-// ── Feedback View (post-step) ────────────────────────────────
+// ── Loading Mode ────────────────────────────────────────────
 
-function FeedbackView({ step, score, confidence }: {
-  step: SessionStep;
-  score: number;
-  confidence: number | null;
-}) {
-  const pct = Math.round(score * 100);
-  const isGood = score >= 0.7;
-  const confPct = confidence !== null ? Math.round(confidence * 100) : null;
-  const gap = confPct !== null ? pct - confPct : null;
-
+function LoadingMode({ label }: { label: string }) {
   return (
-    <div className="max-w-sm mx-auto w-full flex flex-col items-center animate-fade-in space-y-5">
-      <div className={cn(
-        'w-20 h-20 rounded-2xl flex items-center justify-center',
-        isGood ? 'bg-green-100 dark:bg-green-900/30' : 'bg-yellow-100 dark:bg-yellow-900/30'
-      )}>
-        {isGood
-          ? <Check className="w-10 h-10 text-green-600" />
-          : <AlertCircle className="w-10 h-10 text-yellow-600" />
-        }
-      </div>
-
-      <div className="text-center">
-        <p className="text-4xl font-bold text-foreground">{pct}%</p>
-        <p className="text-muted-foreground mt-1">{step.concept_name}</p>
-      </div>
-
-      {gap !== null && Math.abs(gap) > 5 && (
-        <p className="text-sm text-muted-foreground text-center leading-relaxed">
-          You felt {confPct}% confident — {gap > 10 ? 'you did better than expected!' : gap < -10 ? 'this needs more practice.' : 'good calibration.'}
-        </p>
-      )}
-
-      <div className="flex items-center gap-3 text-muted-foreground">
-        <div className="w-5 h-5 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
-        <span className="text-sm">Next step...</span>
-      </div>
+    <div className="flex flex-col items-center justify-center py-16 animate-fade-in">
+      <div className="w-10 h-10 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
+      <p className="text-muted-foreground mt-4 text-sm font-medium">{label}</p>
     </div>
   );
 }
 
-// ── Summary View ─────────────────────────────────────────────
+// ── Summary View ────────────────────────────────────────────
 
-function SummaryView({ summary, onContinue, onAnother }: {
-  summary: SessionSummary;
-  onContinue: () => void;
+function SummaryView({ plan, scores, onHome, onAnother }: {
+  plan: StudyPlan;
+  scores: BlockScore[];
+  onHome: () => void;
   onAnother: () => void;
 }) {
-  const minutes = Math.max(1, Math.round(summary.time_on_task_seconds / 60));
-  const avgPct = Math.round(summary.average_score * 100);
+  const avgScore = scores.length > 0
+    ? scores.reduce((sum, s) => sum + s.score, 0) / scores.length
+    : 0;
+  const avgPct = Math.round(avgScore * 100);
+
+  const uniqueBlocks = new Set(scores.map(s => s.blockIndex)).size;
 
   return (
-    <div className="max-w-md mx-auto w-full space-y-6 animate-fade-in">
-      <div className="text-center">
-        <div className="w-16 h-16 rounded-2xl bg-forest-600 flex items-center justify-center mx-auto mb-4">
-          <Trophy className="w-8 h-8 text-white" />
-        </div>
-        <h2 className="font-display text-3xl font-bold tracking-tight">Session complete</h2>
-        <p className="text-muted-foreground mt-2">
-          {summary.completed_steps} of {summary.total_steps} steps in {minutes} min
-        </p>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl border bg-card p-4 text-center">
-          <p className="text-3xl font-bold text-foreground">{avgPct}%</p>
-          <p className="text-xs text-muted-foreground mt-1">Score</p>
-        </div>
-        <div className="rounded-xl border bg-card p-4 text-center">
-          <p className="text-3xl font-bold text-foreground">{summary.concepts_practiced.length}</p>
-          <p className="text-xs text-muted-foreground mt-1">Concepts</p>
-        </div>
-        <div className="rounded-xl border bg-card p-4 text-center">
-          <p className="text-3xl font-bold text-foreground">{minutes}m</p>
-          <p className="text-xs text-muted-foreground mt-1">Time</p>
-        </div>
-      </div>
-
-      {summary.improved.length > 0 && (
-        <div className="rounded-xl border bg-card p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <TrendingUp className="w-4 h-4 text-green-600" />
-            <h3 className="text-sm font-semibold text-foreground">Improved</h3>
+    <div className="flex-1 flex items-center justify-center py-8">
+      <div className="max-w-md mx-auto w-full space-y-6 animate-fade-in">
+        <div className="text-center">
+          <div className="w-16 h-16 rounded-2xl bg-forest-600 flex items-center justify-center mx-auto mb-4">
+            <Trophy className="w-8 h-8 text-white" />
           </div>
-          <div className="flex flex-wrap gap-2">
-            {summary.improved.map(c => (
-              <Badge key={c} className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-0">{c}</Badge>
-            ))}
+          <h2 className="font-display text-3xl font-bold tracking-tight">Session complete</h2>
+          <p className="text-muted-foreground mt-2">
+            {plan.topic} · {plan.total_duration} min
+          </p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-xl border bg-card p-4 text-center">
+            <p className="text-3xl font-bold text-foreground">{avgPct}%</p>
+            <p className="text-xs text-muted-foreground mt-1">Score</p>
+          </div>
+          <div className="rounded-xl border bg-card p-4 text-center">
+            <p className="text-3xl font-bold text-foreground">{uniqueBlocks}</p>
+            <p className="text-xs text-muted-foreground mt-1">Blocks</p>
+          </div>
+          <div className="rounded-xl border bg-card p-4 text-center">
+            <p className="text-3xl font-bold text-foreground">{scores.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">Activities</p>
           </div>
         </div>
-      )}
 
-      {summary.still_weak.length > 0 && (
-        <div className="rounded-xl border bg-card p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertCircle className="w-4 h-4 text-yellow-600" />
-            <h3 className="text-sm font-semibold text-foreground">Needs more work</h3>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {summary.still_weak.map(c => (
-              <Badge key={c} className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 border-0">{c}</Badge>
-            ))}
-          </div>
+        {/* Per-block breakdown */}
+        <div className="rounded-xl border bg-card p-5 space-y-3">
+          <h3 className="text-sm font-semibold text-foreground">Block Scores</h3>
+          {plan.blocks.map((block, i) => {
+            const blockScores = scores.filter(s => s.blockIndex === i);
+            const blockAvg = blockScores.length > 0
+              ? Math.round((blockScores.reduce((s, x) => s + x.score, 0) / blockScores.length) * 100)
+              : null;
+            return (
+              <div key={block.id} className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground truncate flex-1">{block.unit}</span>
+                {blockAvg !== null ? (
+                  <span className={cn(
+                    'font-medium',
+                    blockAvg >= 70 ? 'text-green-600' : blockAvg >= 40 ? 'text-yellow-600' : 'text-red-500'
+                  )}>
+                    {blockAvg}%
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </div>
+            );
+          })}
         </div>
-      )}
 
-      <div className="flex gap-3 pt-2">
-        <button
-          onClick={onContinue}
-          className="flex-1 rounded-xl border-2 bg-card px-4 py-3.5 text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
-        >
-          Back to Home
-        </button>
-        <button
-          onClick={onAnother}
-          className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
-          Study more
-          <ArrowRight className="w-4 h-4" />
-        </button>
+        <div className="flex gap-3 pt-2">
+          <button
+            onClick={onHome}
+            className="flex-1 rounded-xl border-2 bg-card px-4 py-3.5 text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+          >
+            Back to Home
+          </button>
+          <button
+            onClick={onAnother}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            Study more
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </div>
   );

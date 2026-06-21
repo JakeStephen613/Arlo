@@ -100,15 +100,7 @@ export default function Index() {
 
       {/* CTA */}
       <button
-        onClick={() => {
-          if (b.due_reviews.length > 0) {
-            navigate('/session?intent=quick_review');
-          } else if (isEmpty) {
-            navigate('/session?intent=learn_new');
-          } else {
-            navigate('/session?intent=deep_session');
-          }
-        }}
+        onClick={() => navigate('/session')}
         className="w-full flex items-center justify-between rounded-xl bg-forest-700 dark:bg-forest-600 p-6 transition-all hover:bg-forest-600 dark:hover:bg-forest-500 hover:shadow-card group"
       >
         <div className="text-left">
@@ -127,7 +119,7 @@ export default function Index() {
       </button>
 
       {isEmpty ? (
-        <EmptyState onStart={() => navigate('/session?intent=learn_new')} />
+        <EmptyState onStart={() => navigate('/session')} />
       ) : (
         <>
           {/* Stats row */}
