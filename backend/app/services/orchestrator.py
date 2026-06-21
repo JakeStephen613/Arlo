@@ -129,9 +129,10 @@ def create_session(
 
     # If no concepts exist yet, bootstrap from the topic
     if not concepts and topic:
-        concept_id = ensure_concept(topic, topic)
+        clean_name = _extract_topic_name(topic)
+        concept_id = ensure_concept(clean_name, clean_name)
         concepts = [ConceptSnapshot(
-            concept_id=UUID(concept_id), name=topic, topic=topic,
+            concept_id=UUID(concept_id), name=clean_name, topic=clean_name,
             mastery=0.0, uncertainty=1.0, streak=0, priority=1.0,
         )]
     elif not concepts:
@@ -331,16 +332,15 @@ def _build_step_sequence(
 
     if config.get("teach") and StepMode.TEACH in modes:
         for c in concepts:
-            if c.mastery < 0.5:
-                steps.append(SessionStep(
-                    step_number=step_num,
-                    mode=StepMode.TEACH,
-                    concept_id=c.concept_id,
-                    concept_name=c.name,
-                    difficulty=_mastery_to_difficulty(c.mastery),
-                    rationale=f"Teaching {c.name} (mastery {c.mastery:.0%})",
-                ))
-                step_num += 1
+            steps.append(SessionStep(
+                step_number=step_num,
+                mode=StepMode.TEACH,
+                concept_id=c.concept_id,
+                concept_name=c.name,
+                difficulty=_mastery_to_difficulty(c.mastery),
+                rationale=f"Learning {c.name}",
+            ))
+            step_num += 1
 
     retrieval_modes = [m for m in practice_modes if m != StepMode.TEACH]
     if not retrieval_modes:
@@ -374,6 +374,28 @@ def _build_step_sequence(
         ))
 
     return steps
+
+
+def _extract_topic_name(raw: str) -> str:
+    """Clean user input like 'teach me bio' into a proper concept name like 'Biology'."""
+    import re
+    cleaned = re.sub(
+        r'^(teach\s+me\s+|learn\s+|study\s+|help\s+(me\s+)?(with\s+)?|i\s+want\s+to\s+(learn|study)\s+|explain\s+)',
+        '', raw.strip(), flags=re.IGNORECASE,
+    ).strip()
+    if not cleaned:
+        cleaned = raw.strip()
+    EXPANSIONS = {
+        'bio': 'Biology', 'chem': 'Chemistry', 'phys': 'Physics',
+        'math': 'Mathematics', 'maths': 'Mathematics', 'cs': 'Computer Science',
+        'econ': 'Economics', 'psych': 'Psychology', 'eng': 'English',
+        'calc': 'Calculus', 'stats': 'Statistics', 'geo': 'Geography',
+        'hist': 'History', 'gov': 'Government', 'lit': 'Literature',
+    }
+    lower = cleaned.lower()
+    if lower in EXPANSIONS:
+        return EXPANSIONS[lower]
+    return cleaned.title() if len(cleaned) < 40 else cleaned[:40].title()
 
 
 def _mastery_to_difficulty(mastery: float) -> str:

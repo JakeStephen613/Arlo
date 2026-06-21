@@ -109,19 +109,21 @@ export default function Index() {
             navigate('/session?intent=deep_session');
           }
         }}
-        className="w-full flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 p-5 transition-all hover:border-primary/40 hover:bg-primary/10 hover:shadow-card group"
+        className="w-full flex items-center justify-between rounded-xl bg-forest-700 dark:bg-forest-600 p-6 transition-all hover:bg-forest-600 dark:hover:bg-forest-500 hover:shadow-card group"
       >
         <div className="text-left">
-          <p className="text-sm font-medium text-muted-foreground">Start session</p>
-          <p className="text-lg font-semibold text-foreground mt-0.5">
+          <p className="text-sm font-medium text-white/70">
+            {b.due_reviews.length > 0 ? 'You have items due' : isEmpty ? 'Get started' : 'Keep going'}
+          </p>
+          <p className="text-lg font-bold text-white mt-0.5">
             {b.due_reviews.length > 0
               ? `Review ${b.due_reviews.length} due concept${b.due_reviews.length !== 1 ? 's' : ''}`
               : isEmpty
-                ? 'Learn something new'
-                : 'Continue studying'}
+                ? 'Start your first session'
+                : `Continue with ${b.current_focus || 'your studies'}`}
           </p>
         </div>
-        <ArrowRight className="w-5 h-5 text-primary opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+        <ArrowRight className="w-5 h-5 text-white opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
       </button>
 
       {isEmpty ? (

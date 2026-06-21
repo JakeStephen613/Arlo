@@ -128,11 +128,14 @@ async def assess_feynman_teaching(request: Request, payload: FeynmanAssessmentRe
     text = call_messages(messages, response_format={"type": "json_object"}, max_tokens=2000)
 
     try:
-        data = json.loads(text)
+        import re
+        json_match = re.search(r'\{.*\}', text, re.DOTALL)
+        raw_json = json_match.group(0) if json_match else text
+        data = json.loads(raw_json)
         mastery_score = int(data.get("mastery_score", 50))
         score = mastery_score / 100.0
     except Exception as e:
-        logger.error("Feynman assessment parse failed: %s", e)
+        logger.error("Feynman assessment parse failed: %s | raw: %s", e, text[:200])
         mastery_score = 50
         score = 0.5
         data = {"what_went_well": [], "gaps_in_understanding": ["Could not assess."]}

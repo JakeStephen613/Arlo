@@ -33,7 +33,7 @@ class QuizRequest(BaseModel):
     content: str = Field(..., min_length=10)
     difficulty: Optional[str] = "medium"
     user_id: Optional[str] = None
-    max_questions: int = Field(7, ge=5, le=7)
+    max_questions: int = Field(7, ge=1, le=10)
     concept_name: Optional[str] = None
     topic: Optional[str] = None
 
