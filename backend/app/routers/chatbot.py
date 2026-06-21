@@ -7,7 +7,7 @@ from slowapi.util import get_remote_address
 limiter = Limiter(key_func=get_remote_address)
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Literal
-from openai import OpenAI
+from app.services.llm import client
 import os
 import logging
 import requests
@@ -19,9 +19,8 @@ import json
 # ---------------------------
 # Setup
 # ---------------------------
-from config import OPENAI_API_KEY, CONTEXT_API_BASE
+from app.core.config import CONTEXT_API_BASE
 
-client = OpenAI(api_key=OPENAI_API_KEY)
 CONTEXT_API = CONTEXT_API_BASE
 
 logging.basicConfig(level=logging.INFO)
@@ -191,7 +190,6 @@ def call_gpt_sync(prompt: str, schema: dict, fallback_response: dict) -> dict:
         ]
         
         response = client.chat.completions.create(
-            model="gpt-4.1-nano",
             messages=messages,
             response_format={
                 "type": "json_schema",

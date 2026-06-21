@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Literal
-from openai import OpenAI
+from app.services.llm import client
 import json
 import uuid
 import asyncio
@@ -9,11 +9,10 @@ import httpx
 import re
 import logging
 
-from config import OPENAI_API_KEY, CONTEXT_API_BASE
-from context import get_cached_context_fast
+from app.core.config import CONTEXT_API_BASE
+from app.services.context import get_cached_context_fast
 
 logger = logging.getLogger(__name__)
-client = OpenAI(api_key=OPENAI_API_KEY)
 CONTEXT_BASE_URL = CONTEXT_API_BASE
 
 router = APIRouter()
@@ -166,10 +165,9 @@ def _validate_and_sanitize_flashcards(flashcards: List[FlashcardResponseItem]) -
         ))
     return True, None, sanitized
 
-# --- OpenAI call wrapper --- #
+# --- Claude call wrapper --- #
 def _call_model_and_get_parsed(input_messages, max_tokens=4000):
     return client.responses.parse(
-        model="gpt-4.1-nano",
         input=input_messages,
         text_format=FlashcardResponse,
         reasoning={"effort": "low"},

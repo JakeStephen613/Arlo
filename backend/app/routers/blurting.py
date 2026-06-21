@@ -1,16 +1,14 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
-from openai import OpenAI
+from app.services.llm import client
 import json
 import asyncio
 import logging
 
-from config import OPENAI_API_KEY
-from context import get_cached_context_fast
+from app.services.context import get_cached_context_fast
 
 logger = logging.getLogger(__name__)
-client = OpenAI(api_key=OPENAI_API_KEY)
 
 router = APIRouter()
 
@@ -151,7 +149,7 @@ async def post_learning_event_async(user_id: str, exercise_question: str, missed
     
     try:
         import httpx
-        from config import CONTEXT_API_BASE
+        from app.core.config import CONTEXT_API_BASE
         async with httpx.AsyncClient(timeout=10.0) as http:
             await http.post(f"{CONTEXT_API_BASE}/api/context/update", json=payload)
     except Exception as e:
@@ -258,7 +256,6 @@ Create 3 distinct blurting exercises targeting different memory retrieval patter
         
         # Make API call with structured outputs
         response = client.chat.completions.create(
-            model="gpt-4.1-nano",
             messages=messages,
             response_format={
                 "type": "json_schema",
@@ -324,7 +321,6 @@ Evaluate the student's performance by identifying key concepts from the question
         
         # Make API call with structured outputs
         response = client.chat.completions.create(
-            model="gpt-4.1-nano",
             messages=messages,
             response_format={
                 "type": "json_schema",

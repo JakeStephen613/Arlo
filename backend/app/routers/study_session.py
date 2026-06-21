@@ -10,14 +10,13 @@ from slowapi.util import get_remote_address
 
 limiter = Limiter(key_func=get_remote_address)
 from pydantic import BaseModel, Field
-from openai import OpenAI
+from app.services.llm import client
 import httpx
 
-from config import OPENAI_API_KEY, CONTEXT_API_BASE
+from app.core.config import CONTEXT_API_BASE
 import logging
 
 logger = logging.getLogger(__name__)
-client = OpenAI(api_key=OPENAI_API_KEY)
 CONTEXT_API = CONTEXT_API_BASE
 
 router = APIRouter()
@@ -290,11 +289,10 @@ async def update_context_async(payload: dict) -> bool:
         logger.warning("Context update failed: %s", e)
         return False
 
-# --- OpenAI call wrapper --- #
+# --- Claude call wrapper --- #
 def _call_model_and_get_parsed(input_messages: List[Dict[str, Any]], max_tokens: int = 4000):
     """Call Responses API and parse into StudyPlanOutput (strict schema)."""
     return client.responses.parse(
-        model="gpt-4.1-nano",
         input=input_messages,
         text_format=StudyPlanOutput,
         reasoning={"effort": "low"},

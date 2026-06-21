@@ -5,29 +5,10 @@ interface TeachingLesson {
   content: string | string[];
 }
 
-interface YouTubeVideo {
-  title: string;
-  video_id: string;
-  url: string;
-  thumbnail: string;
-  duration: string;
-  channel_title: string;
-  view_count: number;
-  published_at: string;
-  query_used: string;
-  relevant_segments: Array<{
-    start_time: string;
-    end_time: string;
-    topic: string;
-    relevance_score: number;
-  }>;
-}
-
 interface TeachingResponse {
   lesson?: TeachingLesson[];
   lessons?: TeachingLesson[];
   quiz?: TeachingLesson[];
-  youtube_video?: YouTubeVideo;
 }
 
 const teachingContentCache = new Map<string, TeachingResponse>();
@@ -67,17 +48,14 @@ const performTeachingRequest = async (description: string): Promise<TeachingResp
   if (data.quiz && !data.lesson && !data.lessons) {
     const fallback: TeachingLesson[] = [
       {
-        type: 'section',
         title: `Understanding ${description}`,
         content: `Let's explore the key concepts and principles related to ${description}. This lesson will help you build a solid foundation for understanding this topic.`,
       },
       {
-        type: 'section',
         title: 'Key Concepts',
         content: `Here are the important aspects you should focus on when studying ${description}:`,
       },
       {
-        type: 'bullet_list',
         title: 'Main Points to Remember',
         content: [
           'Focus on understanding the core principles',
@@ -87,7 +65,6 @@ const performTeachingRequest = async (description: string): Promise<TeachingResp
         ],
       },
       {
-        type: 'section',
         title: 'Study Strategy',
         content: `When studying ${description}, remember to break down complex concepts into smaller, manageable parts.`,
       },
