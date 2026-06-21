@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run against local server: bash smoke_test.sh
-# Requires the server running: uvicorn main:app --port 10000 --reload
+# Requires the server running: uvicorn app.main:app --port 10000 --reload
 # Requires a valid user ID in USER_ID env var (optional — anon endpoints work without it)
 
 BASE="http://localhost:10000"

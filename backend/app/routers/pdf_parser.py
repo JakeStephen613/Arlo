@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import PlainTextResponse
 import fitz  # PyMuPDF
-from openai import OpenAI
+from app.services.llm import client
 import os
 import asyncio
 import concurrent.futures
@@ -10,9 +10,7 @@ import json
 from datetime import datetime
 import logging
 
-from config import OPENAI_API_KEY
 
-client = OpenAI(api_key=OPENAI_API_KEY)
 router = APIRouter()
 
 # Configure logging
@@ -227,7 +225,6 @@ Focus on content that would help a student learn and understand the subject matt
         ]
 
         response = client.chat.completions.create(
-            model="gpt-4.1-nano",
             messages=messages,
             reasoning_effort="low"
         )

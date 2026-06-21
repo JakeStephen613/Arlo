@@ -4,11 +4,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Required — raises KeyError at startup if missing (better than failing at first request)
-OPENAI_API_KEY: str = os.environ["OPENAI_API_KEY"]
+ANTHROPIC_API_KEY: str = os.environ["ANTHROPIC_API_KEY"]
 SUPABASE_URL: str = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE: str = os.environ["SUPABASE_SERVICE_ROLE"]
 SUPABASE_JWT_SECRET: str = os.environ["SUPABASE_JWT_SECRET"]
-YOUTUBE_API_KEY: str = os.environ["YOUTUBE_API_KEY"]
 
 # Optional with defaults
 ENV: str = os.getenv("ENV", "production")

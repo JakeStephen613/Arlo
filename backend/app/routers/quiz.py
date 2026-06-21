@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel, Field, validator
 from typing import List, Literal, Optional, Dict, Any
-from openai import OpenAI
+from app.services.llm import client
 import uuid
 import asyncio
 import httpx
@@ -10,11 +10,10 @@ import time
 from datetime import datetime
 from enum import Enum
 
-from config import OPENAI_API_KEY, CONTEXT_API_BASE
-from context import get_cached_context_fast
+from app.core.config import CONTEXT_API_BASE
+from app.services.context import get_cached_context_fast
 
 logger = logging.getLogger(__name__)
-client = OpenAI(api_key=OPENAI_API_KEY)
 CONTEXT_API = CONTEXT_API_BASE
 
 router = APIRouter()
@@ -121,11 +120,10 @@ REQUIREMENTS:
 Create exactly {max_questions} multiple-choice questions that thoroughly test student understanding."""
 
 # -----------------------------
-# OpenAI call wrapper - Updated for GPT-5-nano
+# Claude call wrapper
 # -----------------------------
 def _call_model_and_get_parsed(input_messages, max_tokens=6000):
     return client.responses.parse(
-        model="gpt-4.1-nano",
         input=input_messages,
         text_format=QuizGenerationResponse,
         reasoning={"effort": "low"},

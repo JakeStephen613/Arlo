@@ -4,16 +4,14 @@ from typing import Optional, List, Literal, Tuple
 import json
 import logging
 import asyncio
-from openai import OpenAI
+from app.services.llm import client
 import re
 
-from config import OPENAI_API_KEY
-from context import get_cached_context_fast
+from app.services.context import get_cached_context_fast
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("feynman_teaching")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
 
 router = APIRouter()
 
@@ -187,10 +185,9 @@ def _validate_and_sanitize_assessment(assessment: dict) -> Tuple[bool, Optional[
     
     return True, None, sanitized_assessment
 
-# --- OpenAI call wrapper --- #
+# --- Claude call wrapper --- #
 def _call_model_and_get_parsed_exercise(input_messages, max_tokens=2000):
     return client.responses.parse(
-        model="gpt-4.1-nano",
         input=input_messages,
         text_format=FeynmanExerciseResponse,
         reasoning={"effort": "low"},
@@ -200,7 +197,6 @@ def _call_model_and_get_parsed_exercise(input_messages, max_tokens=2000):
 
 def _call_model_and_get_parsed_assessment(input_messages, max_tokens=3000):
     return client.responses.parse(
-        model="gpt-4.1-nano",
         input=input_messages,
         text_format=FeynmanAssessmentResponse,
         reasoning={"effort": "low"},
