@@ -1,0 +1,17 @@
+# Direct dependencies (human-edited). Compile to requirements.txt with:
+#   uv pip compile requirements.in -o requirements.txt
+# The compiled requirements.txt is a full lock — pip installs it with no
+# dependency resolution (no backtracking), so deploys are fast and reproducible.
+fastapi==0.115.2
+uvicorn[standard]==0.27.1
+anthropic==0.111.0
+python-dotenv==1.0.1
+requests==2.32.3
+httpx==0.28.1
+PyPDF2==3.0.1
+python-multipart==0.0.12
+supabase==2.16.0
+PyJWT==2.9.0
+PyMuPDF==1.24.10
+aiohttp==3.10.10
+slowapi==0.1.9
