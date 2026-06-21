@@ -266,8 +266,13 @@ async def grade_check_question(request: Request, req: CheckQuestionRequest):
     messages = [
         {
             "role": "system",
-            "content": "Grade this student's answer. Return JSON: "
-            '{"correct": bool, "score": float 0-1, "explanation": "one sentence why"}',
+            "content": (
+                "Grade this student's answer to a comprehension check question. "
+                "Be generous with partial credit — if they show understanding of the core concept, give credit even if wording isn't perfect. "
+                "Score: 1.0 = fully correct, 0.7 = mostly right with minor gap, 0.4 = partial understanding, 0.0 = wrong or no understanding. "
+                "Explanation: 1-2 sentences. If correct, reinforce why. If wrong, gently explain the right answer. "
+                'Return JSON: {"correct": bool, "score": float 0-1, "explanation": "..."}'
+            ),
         },
         {
             "role": "user",

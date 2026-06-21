@@ -79,17 +79,33 @@ def _get_user_id(request: Request, fallback: Optional[str] = None) -> str:
     raise HTTPException(status_code=401, detail="Not authenticated")
 
 
-EXERCISE_SYSTEM = """Design 3 blurting exercises from teaching content.
-Exercise 1: factual recall (definitions, specific details)
-Exercise 2: process/sequence recall (steps, cause-effect)
-Exercise 3: conceptual understanding (relationships, comparisons)
-Return JSON: {"exercises": [{"prompt": "...", "focus": "..."}, ...]}"""
+EXERCISE_SYSTEM = """Design 3 blurting exercises based on the teaching content provided. Blurting is a recall technique: the student writes down everything they remember about a prompt WITHOUT looking at notes.
 
-FEEDBACK_SYSTEM = """Evaluate a student's blurting response.
-Identify key concepts from the question, categorize recall into mentioned/partial/missed.
+Each exercise should target a different cognitive level:
+1. Factual recall: "Write down everything you remember about [specific topic/definition/details]."
+2. Process/sequence recall: "Describe the steps of [process] from memory." or "Explain the cause-and-effect chain of [phenomenon]."
+3. Conceptual synthesis: "Compare and contrast [X] and [Y] from memory." or "Explain how [concept A] relates to [concept B]."
+
+Make prompts specific to the teaching content — reference actual concepts, terms, and processes that were taught. Do NOT use generic prompts like "recall key concepts."
+
+Return JSON: {"exercises": [{"prompt": "...", "focus": "..."}, {"prompt": "...", "focus": "..."}, {"prompt": "...", "focus": "..."}]}"""
+
+FEEDBACK_SYSTEM = """Evaluate a student's blurting (free recall) response. Your job is to identify what key concepts they remembered, partially remembered, or missed entirely.
+
+EVALUATION PROCESS:
+1. List 5-8 key concepts that a complete answer should include (based on the question).
+2. Check the student's response against each key concept.
+3. "mentioned" = clearly stated the concept correctly
+4. "partial_mentions" = alluded to it or got it partially right
+5. "missed" = not mentioned or stated incorrectly
+
+FEEDBACK TONE:
+- Start by acknowledging what they got right — be specific ("Great job remembering that X leads to Y").
+- For missed concepts, give a brief 1-sentence reminder of what they missed.
+- End with encouragement and a suggestion for what to review.
+
 Return JSON: {"mentioned": [...], "partial_mentions": [...], "missed": [...],
-"mentioned_count": int, "total_key_concepts": int, "score_fraction": "N/M", "feedback": "..."}
-Be encouraging, acknowledge what they got right."""
+"mentioned_count": int, "total_key_concepts": int, "score_fraction": "N/M", "feedback": "..."}"""
 
 
 # ── Endpoints ──────────────────────────────────────────────────

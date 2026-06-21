@@ -53,7 +53,7 @@ interface ExpandedSubBlock {
   block: StudyBlock;
 }
 
-type SessionPhase = 'input' | 'generating' | 'plan-review' | 'studying' | 'summary';
+type SessionPhase = 'input' | 'plan-review' | 'studying' | 'summary';
 
 interface BlockScore {
   blockIndex: number;
@@ -81,9 +81,12 @@ export default function Session() {
   const [scores, setScores] = useState<BlockScore[]>([]);
   const [preloadedContent, setPreloadedContent] = useState<Record<string, boolean>>({});
 
+  const [planLoading, setPlanLoading] = useState(false);
+
   const generatePlan = async () => {
     if (!topic.trim() && !pdfContent) return;
-    setPhase('generating');
+    setPlanLoading(true);
+    setPhase('plan-review');
     setError(null);
     try {
       const payload: Record<string, unknown> = { duration };
@@ -91,10 +94,11 @@ export default function Session() {
       if (pdfContent) payload.parsed_summary = pdfContent;
       const result = await apiPost<StudyPlan>('/study-session', payload, 60000);
       setPlan(result);
-      setPhase('plan-review');
     } catch (e: any) {
       setError(e.message || 'Failed to generate study plan');
       setPhase('input');
+    } finally {
+      setPlanLoading(false);
     }
   };
 
@@ -150,9 +154,15 @@ export default function Session() {
           onSubmit={generatePlan}
         />
       )}
-      {phase === 'generating' && <GeneratingState />}
-      {phase === 'plan-review' && plan && (
-        <PlanReview plan={plan} onStart={startStudying} onBack={() => setPhase('input')} />
+      {phase === 'plan-review' && (
+        <PlanReview
+          plan={plan}
+          loading={planLoading}
+          topic={topic}
+          duration={duration}
+          onStart={startStudying}
+          onBack={() => { setPhase('input'); setPlan(null); }}
+        />
       )}
       {phase === 'studying' && plan && subBlocks.length > 0 && (
         <StudyingView
@@ -308,30 +318,6 @@ function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfCo
   );
 }
 
-// ── Generating State ─────────────────────────────────────────
-
-const GENERATING_MESSAGES = [
-  'Designing your curriculum...',
-  'Breaking down subtopics...',
-  'Planning your study blocks...',
-  'Choosing retrieval techniques...',
-];
-
-function GeneratingState() {
-  const [msgIndex, setMsgIndex] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setMsgIndex(i => (i + 1) % GENERATING_MESSAGES.length), 2500);
-    return () => clearInterval(timer);
-  }, []);
-
-  return (
-    <div className="flex-1 flex flex-col items-center justify-center animate-fade-in">
-      <div className="w-12 h-12 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
-      <p className="text-muted-foreground mt-5 font-medium">{GENERATING_MESSAGES[msgIndex]}</p>
-    </div>
-  );
-}
-
 // ── Plan Review ──────────────────────────────────────────────
 
 const TECHNIQUE_ICONS: Record<string, typeof BookOpen> = {
@@ -342,8 +328,11 @@ const TECHNIQUE_ICONS: Record<string, typeof BookOpen> = {
   blurting: Pencil,
 };
 
-function PlanReview({ plan, onStart, onBack }: {
-  plan: StudyPlan;
+function PlanReview({ plan, loading, topic, duration, onStart, onBack }: {
+  plan: StudyPlan | null;
+  loading: boolean;
+  topic: string;
+  duration: number;
   onStart: () => void;
   onBack: () => void;
 }) {
@@ -351,15 +340,21 @@ function PlanReview({ plan, onStart, onBack }: {
     <div className="flex-1 py-8">
       <div className="max-w-2xl mx-auto w-full space-y-6">
         <div className="text-center">
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">{plan.topic}</h1>
-          <p className="text-muted-foreground mt-1">
-            {plan.blocks.length} blocks · {plan.total_duration} min · {plan.pomodoro} pomodoro
-          </p>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
+            {plan?.topic || topic || 'Your study plan'}
+          </h1>
+          {plan ? (
+            <p className="text-muted-foreground mt-1">
+              {plan.blocks.length} blocks · {plan.total_duration} min · {plan.pomodoro} pomodoro
+            </p>
+          ) : (
+            <p className="text-muted-foreground mt-1">Building your {duration}-minute curriculum...</p>
+          )}
         </div>
 
         <div className="space-y-3">
-          {plan.blocks.map((block, i) => (
-            <div key={block.id} className="rounded-xl border bg-card p-5 space-y-2">
+          {plan ? plan.blocks.map((block, i) => (
+            <div key={block.id} className="rounded-xl border bg-card p-5 space-y-2 animate-fade-in">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <span className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
@@ -384,7 +379,21 @@ function PlanReview({ plan, onStart, onBack }: {
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed pl-10">{block.description}</p>
             </div>
-          ))}
+          )) : (
+            Array.from({ length: Math.max(6, Math.floor(duration / 10)) }).map((_, i) => (
+              <div key={i} className="rounded-xl border bg-card p-5 space-y-3 animate-pulse" style={{ animationDelay: `${i * 100}ms` }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-lg bg-muted" />
+                  <div className="space-y-1.5 flex-1">
+                    <div className="h-4 w-1/3 bg-muted rounded" />
+                    <div className="h-3 w-16 bg-muted/60 rounded" />
+                  </div>
+                </div>
+                <div className="h-3 w-full bg-muted/40 rounded ml-10" />
+                <div className="h-3 w-2/3 bg-muted/40 rounded ml-10" />
+              </div>
+            ))
+          )}
         </div>
 
         <div className="flex gap-3">
@@ -396,9 +405,10 @@ function PlanReview({ plan, onStart, onBack }: {
           </button>
           <button
             onClick={onStart}
-            className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+            disabled={loading || !plan}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
           >
-            Start Studying
+            {loading ? 'Generating...' : 'Start Studying'}
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
