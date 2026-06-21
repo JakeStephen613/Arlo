@@ -1,29 +1,40 @@
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any, Literal
-from app.services.llm import client
-import json
-import uuid
-import asyncio
-import httpx
-import re
-import logging
+"""Flashcard mode — generates flashcards, records review attempts.
 
-from app.core.config import CONTEXT_API_BASE
-from app.services.context import get_cached_context_fast
+Consumes TutorBriefing for targeting, calls record_attempt() on review.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+from typing import List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+
+from app.services.llm import call_messages
+from app.services.learner_context import (
+    get_tutor_briefing,
+    record_attempt,
+    ensure_concept,
+    AttemptRecord,
+)
 
 logger = logging.getLogger(__name__)
-CONTEXT_BASE_URL = CONTEXT_API_BASE
-
 router = APIRouter()
 
-# -----------------------------
-# Models
-# -----------------------------
+
+# ── Models ─────────────────────────────────────────────────────
+
+
 class FlashcardRequest(BaseModel):
     content: str
     format: Optional[str] = "Q&A"
     user_id: Optional[str] = None
+    concept_name: Optional[str] = None
+    topic: Optional[str] = None
+
 
 class FlashcardItem(BaseModel):
     id: str
@@ -31,325 +42,108 @@ class FlashcardItem(BaseModel):
     back: str
     difficulty: str
     category: str
-    subcategory: Optional[str] = None
-    learning_objective: Optional[str] = None
-    prerequisite_concepts: Optional[List[str]] = []
-    confidence_level: Optional[float] = 0.5
-    estimated_time_seconds: Optional[int] = 30
-    tags: Optional[List[str]] = []
-    explanation: Optional[str] = None  # Additional context/explanation
 
-# --- Output schema for structured parsing --- #
-class FlashcardResponseItem(BaseModel):
-    question: str
-    answer: str
 
-class FlashcardResponse(BaseModel):
-    flashcards: List[FlashcardResponseItem]
+class FlashcardReviewRequest(BaseModel):
+    card_id: str
+    concept_name: str
+    topic: Optional[str] = None
+    score: float
+    user_id: Optional[str] = None
 
-# -----------------------------
-# Prompt Engineering
-# -----------------------------
-def build_flashcard_prompt(content: str, context: Dict[str, Any]) -> str:
-    # Build personalization context
-    personalization = _build_personalization_context(context)
-    
-    return f"""You are a personalized flashcard-generating tutor. Create flashcards designed for active recall memorization 
 
-This is the teaching content your student was just taught. Identify the 5-7 most important definitions, facts, details, and specific information that is best suited for active recall consolidation. Only mention information found in the teaching content except to fill major gaps if present. 
-{content}
+# ── Helpers ────────────────────────────────────────────────────
 
-PERSONALIZATION CONTEXT:
-{personalization}
 
-GENERATION REQUIREMENTS:
-Create exactly 5-7 flashcards focusing on designed to aid in memory retention, focusing on: 
-- FACTS that need memorization
-- DEFINITIONS of key terms and concepts  
-- IMPORTANT DETAILS that students commonly forget
-- SPECIFIC INFORMATION that benefits from spaced repetition
+def _get_user_id(request: Request, fallback: Optional[str] = None) -> str:
+    user = getattr(request.state, "user", {})
+    uid = user.get("sub")
+    if uid:
+        return uid
+    if request.headers.get("x-user-id"):
+        return request.headers["x-user-id"]
+    if fallback:
+        return fallback
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
-Prioritize information that can be best memorized using flashcards. Focus on consolidating what was actually taught to the student.
 
-QUALITY STANDARDS:
-- Questions should be direct and straightforward
-- Answers should be complete but concise
-- Include examples in answers in paranthesis when they aid understanding
-- Use active voice and clear language
-- Ensure each card addresses a specific learning objective and peice of information 
-
-CRITICAL REQUIREMENTS:
-1. Return ONLY JSON data conforming to the schema, never the schema itself.
-2. Output ONLY valid JSON format with proper escaping.
-3. Use double quotes, escape internal quotes as \\\".
-4. Use \\n for line breaks within content.
-5. No trailing commas.
-
-"""
-
-def _build_personalization_context(context: Dict[str, Any]) -> str:
-    if not context:
-        return "No personalization context available"
-    
-    return f"""Current Topic: {context.get('current_topic', 'General')}
-Learning Goals: {', '.join(context.get('user_goals', [])) or 'Not specified'}
-Strong Areas: {', '.join(context.get('strong_areas', [])) or 'Not specified'}
-Weak Areas: {', '.join(context.get('weak_areas', [])) or 'Not specified'}
-Preferred Learning Style: {context.get('learning_style', 'Not specified')}
-Recent Study Sessions: {len(context.get('recent_sessions', []))}
-Review Queue Size: {len(context.get('review_queue', []))}"""
-
-# --- JSON examples --- #
-ASSISTANT_EXAMPLE_JSON_1 = """{
-  "flashcards": [
-    {
-      "question": "What is the main function of the Golgi apparatus?",
-      "answer": "Modify, sort, and package proteins and lipids for secretion or delivery to other organelles (example: adds carbohydrate tags for targeting)."
-    }
-  ]
-}"""
-
-ASSISTANT_EXAMPLE_JSON_2 = """{
-  "flashcards": [
-    {
-      "question": "What were the four long-term causes of World War I and what mnemonic helps remember them?",
-      "answer": "Militarism, Alliances, Imperialism, Nationalism — mnemonic: MAIN. (Militarism: arms races; Alliances: binding defense pacts; Imperialism: colonial competition; Nationalism: ethnic tensions and national pride.)"
-    }
-  ]
-}"""
-
-ASSISTANT_EXAMPLE_JSON_3 = """{
-  "flashcards": [
-    {
-      "question": "What is an eigenvalue of a matrix A?",
-      "answer": "An eigenvalue is a scalar called lambda for which there exists a nonzero vector v satisfying A v = lambda v (v is the corresponding eigenvector)."
-    }
-  ]
-}"""
-
-# --- Helper utilities --- #
-def _count_words(text: str) -> int:
-    return len(re.findall(r"\w+", text))
-
-def _flashcard_valid(flashcard: FlashcardResponseItem) -> (bool, Optional[str]):
-    if not isinstance(flashcard.question, str) or not flashcard.question.strip():
-        return False, "missing or invalid question"
-    if not isinstance(flashcard.answer, str) or not flashcard.answer.strip():
-        return False, "missing or invalid answer"
-    if len(flashcard.question) < 10:
-        return False, "question too short"
-    if len(flashcard.answer) < 5:
-        return False, "answer too short"
-    return True, None
-
-def _sanitize_content(raw: str) -> str:
-    s = raw.replace("\r\n", "\n").replace("\r", "\n")
-    s = s.replace("\n", "\\n")
-    s = s.replace('"', '\\"')
-    return s
-
-def _validate_and_sanitize_flashcards(flashcards: List[FlashcardResponseItem]) -> (bool, Optional[str], List[FlashcardResponseItem]):
-    sanitized = []
-    for i, card in enumerate(flashcards):
-        if not isinstance(card.question, str) or not isinstance(card.answer, str):
-            return False, f"flashcard {i} has invalid types", flashcards
-        temp_card = FlashcardResponseItem(question=card.question, answer=card.answer)
-        ok, reason = _flashcard_valid(temp_card)
-        if not ok:
-            return False, f"flashcard {i} invalid: {reason}", flashcards
-        sanitized_question = _sanitize_content(card.question)
-        sanitized_answer = _sanitize_content(card.answer)
-        sanitized.append(FlashcardResponseItem(
-            question=sanitized_question,
-            answer=sanitized_answer
-        ))
-    return True, None, sanitized
-
-# --- Claude call wrapper --- #
-def _call_model_and_get_parsed(input_messages, max_tokens=4000):
-    return client.responses.parse(
-        input=input_messages,
-        text_format=FlashcardResponse,
-        reasoning={"effort": "low"},
-        instructions="Generate flashcards that focus on key facts, definitions, and concepts that benefit from spaced repetition.",
-        max_output_tokens=max_tokens,
-    )
-
-def generate_flashcards_sync(
-    content: str,
-    context: Dict[str, Any],
-    request: FlashcardRequest
-) -> List[Dict[str, Any]]:
-    """Synchronous flashcard generation with enhanced AI prompting"""
-    
+def _briefing_context(user_id: str) -> str:
     try:
-        # Build prompt
-        system_prompt = build_flashcard_prompt(content, context)
-        
-        # User prompt
-        user_prompt = f"Create flashcards for this content: {content}\n\nOutput exactly 5-7 flashcards in valid JSON format."
-        
-        # Messages
-        input_messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_1},
-            {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_2},
-            {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_3},
-            {"role": "user", "content": user_prompt},
-        ]
+        briefing = get_tutor_briefing(user_id)
+        if briefing.weak_concepts:
+            weak = ", ".join(c.name for c in briefing.weak_concepts[:3])
+            return f"\nStudent's weak areas: {weak}"
+    except Exception:
+        pass
+    return ""
 
-        # First attempt
-        response = _call_model_and_get_parsed(input_messages)
 
-        if getattr(response, "output_parsed", None) is None:
-            if hasattr(response, "refusal") and response.refusal:
-                raise HTTPException(status_code=400, detail=response.refusal)
-            retry_msg = {
-                "role": "user",
-                "content": "Fix JSON only: If the previous response had any formatting or schema issues, return only the corrected single JSON object. Nothing else."
-            }
-            response = _call_model_and_get_parsed(input_messages + [retry_msg])
-            if getattr(response, "output_parsed", None) is None:
-                raise HTTPException(status_code=500, detail="Model did not return valid parsed output after retry.")
+SYSTEM_PROMPT = """You are a flashcard tutor. Create 5-7 flashcards for active recall.
+Focus on facts, definitions, and key details that benefit from spaced repetition.
+Return JSON: {"flashcards": [{"question": "...", "answer": "..."}]}
+Questions should be direct; answers concise but complete with examples in parentheses when helpful."""
 
-        flashcards = response.output_parsed.flashcards
 
-        # Ensure 5–7 flashcards
-        if not (5 <= len(flashcards) <= 7):
-            retry_msg = {
-                "role": "user",
-                "content": "Fix JSON only: Must have 5-7 flashcards. Return corrected JSON only."
-            }
-            response_retry = _call_model_and_get_parsed(input_messages + [retry_msg])
-            if getattr(response_retry, "output_parsed", None) is None:
-                raise HTTPException(status_code=500, detail=f"Flashcard count invalid ({len(flashcards)}). Retry failed.")
-            flashcards = response_retry.output_parsed.flashcards
-            if not (5 <= len(flashcards) <= 7):
-                raise HTTPException(status_code=500, detail=f"Flashcard count invalid after retry ({len(flashcards)}).")
+# ── Endpoints ──────────────────────────────────────────────────
 
-        # Validate + sanitize
-        valid, reason, sanitized_flashcards = _validate_and_sanitize_flashcards(flashcards)
-        if not valid:
-            retry_msg = {
-                "role": "user",
-                "content": f"Fix JSON only: Last output failed validation ({reason}). Return corrected JSON only."
-            }
-            response_retry = _call_model_and_get_parsed(input_messages + [retry_msg])
-            if getattr(response_retry, "output_parsed", None) is None:
-                raise HTTPException(status_code=500, detail=f"Validation failed ({reason}) and retry failed.")
-            flashcards = response_retry.output_parsed.flashcards
-            valid2, reason2, sanitized_flashcards2 = _validate_and_sanitize_flashcards(flashcards)
-            if not valid2:
-                raise HTTPException(status_code=500, detail=f"Validation failed after retry: {reason2}")
-            sanitized_flashcards = sanitized_flashcards2
 
-        # Convert to dict format for compatibility
-        return [{"question": card.question, "answer": card.answer} for card in sanitized_flashcards]
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("AI generation error")
-        raise HTTPException(status_code=500, detail=f"Failed to generate flashcards: {str(e)}")
-
-async def generate_flashcards_async(
-    content: str,
-    context: Dict[str, Any],
-    request: FlashcardRequest
-) -> List[Dict[str, Any]]:
-    """Async wrapper for flashcard generation"""
-    return generate_flashcards_sync(content, context, request)
-
-# -----------------------------
-# Enhanced Endpoint
-# -----------------------------
 @router.post("/flashcards")
 async def generate_flashcards(request: Request, data: FlashcardRequest):
-    """Enhanced flashcard generation endpoint with original output format"""
-    
-    # Extract user ID
-    user_id = extract_user_id(request, data)
-    
-    # Get user context
-    context_result = await get_cached_context_fast(user_id)
-    context = context_result.get("context", {})
-    
-    # Set parameters from context
-    count = 7  # Changed from 12 to 7
-    difficulty = "medium"
-    topic = context.get("current_topic", "general")
-    
-    # Generate flashcards
+    user_id = _get_user_id(request, data.user_id)
+    ctx = _briefing_context(user_id)
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Create flashcards for:\n\n{data.content}{ctx}"},
+    ]
+
+    text = call_messages(
+        messages,
+        response_format={"type": "json_object"},
+        max_tokens=4000,
+    )
+
     try:
-        raw_cards = await generate_flashcards_async(data.content, context, data)
+        parsed = json.loads(text)
+        cards_raw = parsed.get("flashcards", [])
     except Exception as e:
-        logger.exception("Flashcard generation failed")
+        logger.error("Flashcard parse failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to generate flashcards")
-    
-    # Convert to original FlashcardItem format
-    flashcards = []
-    questions_summary = []
-    
-    for card_data in raw_cards[:count]:
-        q = card_data.get("question", "No question.")
-        a = card_data.get("answer", "No answer.")
-        
-        flashcards.append(FlashcardItem(
+
+    topic = data.topic or "general"
+    flashcards = [
+        FlashcardItem(
             id=f"card_{uuid.uuid4().hex[:6]}",
-            front=q,
-            back=a,
-            difficulty=difficulty,
-            category=topic
-        ))
-        questions_summary.append(q)
-    
-    # Update context with learning event (enhanced)
-    await _update_learning_context(user_id, flashcards, topic)
-    
-    # Return original format
+            front=c.get("question", ""),
+            back=c.get("answer", ""),
+            difficulty="medium",
+            category=topic,
+        )
+        for c in cards_raw[:7]
+    ]
+
     return {
         "flashcards": flashcards,
         "total_cards": len(flashcards),
-        "estimated_time": f"{len(flashcards) * 1.5:.0f} minutes"
+        "estimated_time": f"{len(flashcards) * 2:.0f} minutes",
     }
 
-# -----------------------------
-# Helper Functions
-# -----------------------------
-def extract_user_id(request: Request, data: FlashcardRequest) -> str:
-    """Extract user ID from various sources"""
-    user_info = getattr(request.state, "user", None)
-    if user_info and "sub" in user_info:
-        return user_info["sub"]
-    elif request.headers.get("x-user-id"):
-        return request.headers["x-user-id"]
-    elif data.user_id:
-        return data.user_id
-    else:
-        raise HTTPException(status_code=400, detail="Missing user_id in request")
 
-async def _update_learning_context(user_id: str, flashcards: List[FlashcardItem], topic: str):
-    """Update learning context with flashcard session data"""
-    try:
-        questions_summary = [card.front for card in flashcards]
-        
-        payload = {
-            "source": "flashcards",
-            "user_id": user_id,
-            "current_topic": topic,
-            "learning_event": {
-                "concept": topic,
-                "phase": "flashcards",
-                "confidence": 0.5,
-                "depth": "shallow",
-                "source_summary": "; ".join(questions_summary),
-                "repetition_count": 1,
-                "review_scheduled": False
-            }
-        }
-        
-        async with httpx.AsyncClient(timeout=5.0) as http:
-            await http.post(f"{CONTEXT_BASE_URL}/api/context/update", json=payload)
+@router.post("/flashcards/review")
+async def review_flashcard(request: Request, data: FlashcardReviewRequest):
+    """Record a flashcard review result into the learner model."""
+    user_id = _get_user_id(request, data.user_id)
+    concept_id = ensure_concept(data.concept_name, data.topic)
 
-    except Exception as e:
-        logger.warning("Context update failed: %s", e)
+    result = record_attempt(AttemptRecord(
+        user_id=UUID(user_id),
+        concept_id=UUID(concept_id),
+        mode="flashcard",
+        score=max(0.0, min(1.0, data.score)),
+    ))
+
+    return {
+        "status": "recorded",
+        "new_mastery": result.mastery,
+        "next_review": result.next_review.isoformat(),
+    }

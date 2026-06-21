@@ -1,249 +1,309 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List
-from app.services.llm import client
+"""Teaching module — streams micro-lessons via SSE with inline check-questions.
+
+Consumes TutorBriefing, targets specific concepts at chosen difficulty,
+grades check-question responses, and calls record_attempt().
+"""
+from __future__ import annotations
+
+import json
 import logging
-import re
+from typing import Optional, List
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from app.services.llm import call_messages, stream_messages
+from app.services.learner_context import (
+    get_tutor_briefing,
+    record_attempt,
+    ensure_concept,
+    AttemptRecord,
+)
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
-from app.core.config import ANTHROPIC_API_KEY
+
+# ── Request / Response models ─────────────────────────────────
 
 
-class CombinedRequest(BaseModel):
-    teaching_description: str
+class TeachingRequest(BaseModel):
+    topic: str
     subject: Optional[str] = None
     level: Optional[str] = "intermediate"
-    test_type: Optional[str] = None
+    concept_name: Optional[str] = None
+    difficulty: Optional[str] = "medium"
+    user_id: Optional[str] = None
+
 
 class TeachingBlock(BaseModel):
     title: str
     content: str
 
+
 class CombinedResponse(BaseModel):
     lesson: List[TeachingBlock]
     status: str
 
-GPT_SYSTEM_PROMPT = """You are an expert tutor who excels in teaching difficult content in a way that is engaging and the most simple easy to understand way possible.
-Create exactly 8-14 teaching blocks that thoroughly cover ALL aspects of the requested topic. Your explanations should sound like you're talking directly to the student, never like a textbook.
 
-CRITICAL STYLE REQUIREMENTS:
-- MOST IMPORTANT: mimick exactly the assistant examples, particularly the casual easy to understand nature of explenations with lots of examples and clarifications.
-- Always use **simple words** and explain technical terms in plain English the first time they appear.
-- Always include **relatable analogies, examples, or metaphors**
-- Always keep a **conversational tone**: ask rhetorical questions, say "think of it like…" or "imagine…".
-- Never drift into formal research paper or lecture style.
-- Never introduce advanced words without breaking them down.
-- Never output bullet lists without adding a quick analogy or everyday example to ground them.
-- structure each lesson in accesible way with bullet point breakdowns when helpful
+class CheckQuestionRequest(BaseModel):
+    question: str
+    user_answer: str
+    concept_name: str
+    topic: Optional[str] = None
+    user_id: Optional[str] = None
 
-CRITICAL REQUIREMENTS:
-1. Return ONLY JSON data conforming to the schema, never the schema itself.
-2. Output ONLY valid JSON format with proper escaping.
-3. Use double quotes, escape internal quotes as \\\".
-4. Use \\n for line breaks within content.
-5. No trailing commas.
 
-TEACHING BLOCK STRUCTURE:
-- Each block should fully explain 1-2 subtopics in an easy to understand way.
-- Cover all aspects of the requested topic comprehensively.
-- Use bullet points with * for key concepts and lists.
-- Use **bold formatting** for important terms and concepts.
-- Include examples in parentheses when helpful.
+class CheckQuestionResponse(BaseModel):
+    correct: bool
+    score: float
+    explanation: str
 
-CONTENT QUALITY STANDARDS:
-- Each block should be ~70-130 words.
-- ONLY MENTION information relevant to a test, not tangential information.
-- Define all technical terms at first mention and assume student has almost zero prior knowledge
 
---- Most Important ---
-1. Always output exactly 8-14 separate teaching blocks.
-2. Mimic teaching style of examples as closely as possible, use same casual language, structure, and explanation style.
-"""
+class FollowUpRequest(BaseModel):
+    original_topic: str
+    follow_up: str
+    user_id: Optional[str] = None
 
-class TeachingResponse(BaseModel):
-    lesson: List[TeachingBlock]
 
-ASSISTANT_EXAMPLE_JSON_1 = """
-{
-  "lesson": [
-    {
-      "title": "What is Economics?",
-      "content": "Economics is the study of how people make choices about their limited resources. Everyone—individuals, businesses, and governments—has to make decisions about what to use, what to save, and what to trade.\\n\\n**Key ideas:**\\n* **Scarcity:** Resources (money, time, food, etc.) are limited. We can\\'t have everything we want.\\n* **Choices:** Because of scarcity, we make decisions about what to use resources for.\\n* **Opportunity Cost:** Whenever you choose one thing, you give up the next best alternative. (Example: if you spend $10 on lunch, you can\\'t spend that $10 on a movie ticket.)\\n\\nSo economics is the study of **who gets what, how they can get it, and why!**"
-    }
-  ]
-}
-"""
+# ── Helpers ────────────────────────────────────────────────────
 
-ASSISTANT_EXAMPLE_JSON_2 = """
-{
-  "lesson": [
-    {
-      "title": "The Cell Membrane: Your Cell's Security System",
-      "content": "The **cell membrane** works like a security guard or a bouncer at a door. It decides what can come into the cell and what has to stay out.\\n\\n**Key things to know:**\\n* It's made of a double layer of phospholipids (kind of like a thin soapy bubble wall)\\n* It is **selectively permeable** – a fancy term for deciding what goes in and what comes out\\n* It has special **transport proteins** that act like doors or ID checkers for bigger molecules when they want to enter or leave\\n\\n**What actually gets through:**\\n* Water and very small molecules can slip in and out easily\\n* Larger molecules need a special 'door' (transport proteins)\\n* Waste gets pushed out so the cell stays clean"
-    }
-  ]
-}
-"""
 
-ASSISTANT_EXAMPLE_JSON_3 = """
-{
-  "lesson": [
-    {
-      "title": "Micro vs. Macro Economics",
-      "content": "Economics is split into two main 'worlds.'\\n\\n**Microeconomics:** The study of small, individual decisions.\\n* Example: A family choosing whether to eat out or cook at home\\n* Example: A business deciding how much to charge for sneakers\\n\\n**Macroeconomics:** The study of the whole economy.\\n* Example: Why is inflation rising?\\n* Example: Why do some countries grow richer while others struggle?\\n\\nThink of it like zooming in with a camera: **Micro = close-up**, **Macro = wide-angle** view of the entire economy."
-    }
-  ]
-}
-"""
+def _get_user_id(request: Request, fallback: Optional[str] = None) -> str:
+    user = getattr(request.state, "user", {})
+    uid = user.get("sub")
+    if uid:
+        return uid
+    if request.headers.get("x-user-id"):
+        return request.headers["x-user-id"]
+    if fallback:
+        return fallback
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
-ASSISTANT_EXAMPLE_JSON_4 = """
-{
-  "lesson": [
-    {
-      "title": "Cells and Cell Theory",
-      "content": "A **cell** is the smallest living piece of life that can do all the important things like grow, use energy, react to surroundings, and reproduce.\\n\\n**Cell Theory says:**\\n* All living things are made of cells\\n* All cells come from other cells\\n\\n**Types of cells:**\\n* **Prokaryotes:** Simple cells with no nucleus, DNA floats in cytoplasm, reproduce fast by binary fission (split in two)\\n* **Eukaryotes:** Found in plants and animals, more complex with a nucleus to protect DNA, like miniature cities with factories and workers\\n\\nCells often team up to make bigger organisms (like humans with trillions of cells working together)."
-    }
-  ]
-}
-"""
 
-def _count_words(text: str) -> int:
-    return len(re.findall(r"\w+", text))
+TEACHING_SYSTEM = """You are an expert tutor who excels at teaching difficult content simply.
+Sound like you're talking directly to the student, never like a textbook.
 
-def _block_valid(block: TeachingBlock) -> tuple[bool, Optional[str]]:
-    if not isinstance(block.title, str) or not block.title.strip():
-        return False, "missing or invalid title"
-    if not isinstance(block.content, str) or not block.content.strip():
-        return False, "missing or invalid content"
-    words = _count_words(block.content)
-    if words < 40:
-        return False, f"content too short ({words} words)"
-    if len(block.title) > 200:
-        return False, "title too long"
-    return True, None
+STYLE:
+- Use **simple words**, explain technical terms in plain English
+- Include relatable analogies, examples, or metaphors
+- Conversational tone: rhetorical questions, "think of it like…", "imagine…"
+- Structure with bullet points when helpful
+- Use **bold** for important terms
 
-def _sanitize_content(raw: str) -> str:
-    s = raw.replace("\r\n", "\n").replace("\r", "\n")
-    s = s.replace("\n", "\\n")
-    s = s.replace('"', '\\"')
-    return s
+STRUCTURE:
+- Write 6-10 short sections, each covering 1-2 subtopics
+- Each section: 60-120 words
+- Between sections 3 and 4, and between sections 6 and 7, insert a CHECK QUESTION
+- Format check questions exactly as: [CHECK] question text here [/CHECK]
+- Check questions should test recall of what was just taught
+- Only mention information relevant to understanding the topic"""
 
-def _validate_and_sanitize_blocks(blocks: List[TeachingBlock]) -> tuple[bool, Optional[str], List[TeachingBlock]]:
-    sanitized = []
-    for i, b in enumerate(blocks):
-        if not isinstance(b.title, str) or not isinstance(b.content, str):
-            return False, f"block {i} has invalid types", blocks
-        temp_block = TeachingBlock(title=b.title, content=b.content)
-        ok, reason = _block_valid(temp_block)
-        if not ok:
-            return False, f"block {i} invalid: {reason}", blocks
-        sanitized_content = _sanitize_content(b.content)
-        sanitized.append(TeachingBlock(title=b.title, content=sanitized_content))
-    return True, None, sanitized
 
-def _call_model_and_get_parsed(input_messages, max_tokens=4000):
-    return client.responses.parse(
-        input=input_messages,
-        text_format=TeachingResponse,
-        reasoning={"effort": "low"},
-        instructions="Teach the topic in a casual, and conversational style that mimics how a tutor would explain things. Keep tone engaging throughout entire lesson, especially in the later blocks",
-        max_output_tokens=max_tokens,
+def _build_briefing_context(user_id: str) -> str:
+    try:
+        briefing = get_tutor_briefing(user_id)
+        if not briefing.weak_concepts:
+            return ""
+        weak = ", ".join(
+            f"{c.name} ({c.mastery:.0%})" for c in briefing.weak_concepts[:5]
+        )
+        return f"\n\nSTUDENT CONTEXT: Weak areas: {weak}. Average mastery: {briefing.average_mastery:.0%}."
+    except Exception:
+        return ""
+
+
+# ── SSE streaming endpoint (Step 5) ───────────────────────────
+
+
+@router.post("/teaching/stream")
+async def stream_teaching(request: Request, req: TeachingRequest):
+    """Stream a teaching lesson token-by-token via SSE."""
+    user_id = _get_user_id(request, req.user_id)
+    briefing_ctx = _build_briefing_context(user_id)
+
+    difficulty_instruction = ""
+    if req.difficulty == "easy":
+        difficulty_instruction = "\nUse very simple language, more analogies, shorter sections."
+    elif req.difficulty == "hard":
+        difficulty_instruction = "\nAssume some prior knowledge, go deeper into mechanisms and edge cases."
+
+    messages = [
+        {"role": "system", "content": TEACHING_SYSTEM + briefing_ctx + difficulty_instruction},
+        {
+            "role": "user",
+            "content": f"Teach me about: {req.topic}"
+            + (f"\nSubject: {req.subject}" if req.subject else "")
+            + (f"\nLevel: {req.level}" if req.level else ""),
+        },
+    ]
+
+    async def event_stream():
+        try:
+            buffer = ""
+            section_count = 0
+            async for token in stream_messages(messages):
+                buffer += token
+
+                # Detect section breaks for structured chunk events
+                if "\n## " in buffer or "\n**" in buffer:
+                    section_count += 1
+
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+            # Record teaching as an attempt if concept is specified
+            if req.concept_name:
+                try:
+                    concept_id = ensure_concept(req.concept_name, req.topic)
+                    record_attempt(AttemptRecord(
+                        user_id=UUID(user_id),
+                        concept_id=UUID(concept_id),
+                        mode="teach",
+                        score=0.5,
+                        metadata={"difficulty": req.difficulty or "medium"},
+                    ))
+                except Exception as e:
+                    logger.warning("Failed to record teaching attempt: %s", e)
+
+            yield f"data: {json.dumps({'type': 'done', 'sections': section_count})}\n\n"
+        except Exception as e:
+            logger.error("Streaming error: %s", e)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
-def generate_teaching_content(req: CombinedRequest) -> List[TeachingBlock]:
-    try:
-        context_parts = []
-        if req.subject:
-            context_parts.append(f"Subject: {req.subject}")
-        if req.level:
-            context_parts.append(f"Level: {req.level}")
-        if req.test_type:
-            context_parts.append(f"Test: {req.test_type}")
-        context_info = "\n".join(context_parts)
 
-        user_prompt = f"""{context_info}
+# ── Non-streaming fallback (original endpoint) ────────────────
 
-Create a comprehensive lesson based on this study plan: {req.teaching_description}
-
-Ensure every topic in the study plan is properly explained, and avoid veering from the study plan.
-Output exactly 8-14 teaching blocks in valid JSON format with proper formatting including bullet points and bold text.
-"""
-
-        input_messages = [
-            {"role": "system", "content": GPT_SYSTEM_PROMPT},
-            {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_1},
-            {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_2},
-            {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_3},
-            {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_4},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        response = _call_model_and_get_parsed(input_messages)
-
-        if getattr(response, "output_parsed", None) is None:
-            if hasattr(response, "refusal") and response.refusal:
-                raise HTTPException(status_code=400, detail=response.refusal)
-            retry_msg = {
-                "role": "user",
-                "content": "Fix JSON only: If the previous response had any formatting or schema issues, return only the corrected single JSON object. Nothing else."
-            }
-            response = _call_model_and_get_parsed(input_messages + [retry_msg])
-            if getattr(response, "output_parsed", None) is None:
-                raise HTTPException(status_code=500, detail="Model did not return valid parsed output after retry.")
-
-        lesson_blocks = response.output_parsed.lesson
-
-        if not (8 <= len(lesson_blocks) <= 14):
-            retry_msg = {
-                "role": "user",
-                "content": "Fix JSON only: Must have 8-14 blocks. Return corrected JSON only."
-            }
-            response_retry = _call_model_and_get_parsed(input_messages + [retry_msg])
-            if getattr(response_retry, "output_parsed", None) is None:
-                raise HTTPException(status_code=500, detail=f"Lesson block count invalid ({len(lesson_blocks)}). Retry failed.")
-            lesson_blocks = response_retry.output_parsed.lesson
-            if not (8 <= len(lesson_blocks) <= 14):
-                raise HTTPException(status_code=500, detail=f"Lesson block count invalid after retry ({len(lesson_blocks)}).")
-
-        valid, reason, sanitized_blocks = _validate_and_sanitize_blocks(lesson_blocks)
-        if not valid:
-            retry_msg = {
-                "role": "user",
-                "content": f"Fix JSON only: Last output failed validation ({reason}). Return corrected JSON only."
-            }
-            response_retry = _call_model_and_get_parsed(input_messages + [retry_msg])
-            if getattr(response_retry, "output_parsed", None) is None:
-                raise HTTPException(status_code=500, detail=f"Validation failed ({reason}) and retry failed.")
-            lesson_blocks = response_retry.output_parsed.lesson
-            valid2, reason2, sanitized_blocks2 = _validate_and_sanitize_blocks(lesson_blocks)
-            if not valid2:
-                raise HTTPException(status_code=500, detail=f"Validation failed after retry: {reason2}")
-            sanitized_blocks = sanitized_blocks2
-
-        return sanitized_blocks
-
-    except Exception as e:
-        logger.error(f"Error generating teaching content: {e}")
-        raise e
 
 @router.post("/combined", response_model=CombinedResponse)
-async def get_combined_content(req: CombinedRequest):
+async def get_combined_content(request: Request, req: TeachingRequest):
+    user_id = _get_user_id(request, req.user_id)
+    briefing_ctx = _build_briefing_context(user_id)
+
+    messages = [
+        {"role": "system", "content": TEACHING_SYSTEM + briefing_ctx
+         + "\n\nReturn a JSON object: {\"lesson\": [{\"title\": \"...\", \"content\": \"...\"}]}. "
+         + "Output 8-14 blocks. Return ONLY valid JSON."},
+        {
+            "role": "user",
+            "content": f"Create a comprehensive lesson about: {req.topic}"
+            + (f"\nSubject: {req.subject}" if req.subject else ""),
+        },
+    ]
+
+    text = call_messages(
+        messages,
+        response_format={"type": "json_object"},
+        max_tokens=6000,
+    )
+
     try:
-        logger.info(f"Processing teaching request - Subject: {req.subject}")
-        teaching_blocks = generate_teaching_content(req)
-        return CombinedResponse(lesson=teaching_blocks, status="success")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in combined endpoint: {e}")
-        raise HTTPException(status_code=500, detail=f"Service temporarily unavailable: {str(e)}")
+        data = json.loads(text)
+        blocks = [TeachingBlock(**b) for b in data.get("lesson", [])]
+    except (json.JSONDecodeError, Exception) as e:
+        logger.error("Failed to parse teaching response: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to generate lesson")
+
+    if req.concept_name:
+        try:
+            concept_id = ensure_concept(req.concept_name, req.topic)
+            record_attempt(AttemptRecord(
+                user_id=UUID(user_id),
+                concept_id=UUID(concept_id),
+                mode="teach",
+                score=0.5,
+                metadata={"difficulty": req.difficulty or "medium"},
+            ))
+        except Exception as e:
+            logger.warning("Failed to record teaching attempt: %s", e)
+
+    return CombinedResponse(lesson=blocks, status="success")
+
+
+# ── Check-question grading ─────────────────────────────────────
+
+
+@router.post("/teaching/check", response_model=CheckQuestionResponse)
+async def grade_check_question(request: Request, req: CheckQuestionRequest):
+    """Grade an inline check-question from a teaching session."""
+    user_id = _get_user_id(request, req.user_id)
+
+    messages = [
+        {
+            "role": "system",
+            "content": "Grade this student's answer. Return JSON: "
+            '{"correct": bool, "score": float 0-1, "explanation": "one sentence why"}',
+        },
+        {
+            "role": "user",
+            "content": f"Question: {req.question}\nStudent answer: {req.user_answer}",
+        },
+    ]
+
+    text = call_messages(messages, response_format={"type": "json_object"}, max_tokens=300)
+
+    try:
+        data = json.loads(text)
+        score = float(data.get("score", 0.5))
+    except Exception:
+        score = 0.5
+        data = {"correct": False, "score": 0.5, "explanation": "Could not grade answer."}
+
+    concept_id = ensure_concept(req.concept_name, req.topic)
+    record_attempt(AttemptRecord(
+        user_id=UUID(user_id),
+        concept_id=UUID(concept_id),
+        mode="teach_check",
+        score=score,
+    ))
+
+    return CheckQuestionResponse(
+        correct=data.get("correct", score >= 0.5),
+        score=score,
+        explanation=data.get("explanation", ""),
+    )
+
+
+# ── Follow-up / "explain differently" ─────────────────────────
+
+
+@router.post("/teaching/followup")
+async def teaching_followup(request: Request, req: FollowUpRequest):
+    """Stream a follow-up explanation without leaving the teaching flow."""
+    _get_user_id(request, req.user_id)
+
+    messages = [
+        {
+            "role": "system",
+            "content": "You are an expert tutor. The student was just learning about the topic below "
+            "and has a follow-up question. Answer concisely (3-5 sentences) in a conversational style.",
+        },
+        {
+            "role": "user",
+            "content": f"Topic: {req.original_topic}\nQuestion: {req.follow_up}",
+        },
+    ]
+
+    async def event_stream():
+        async for token in stream_messages(messages, max_tokens=1000):
+            yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
 
 @router.get("/combined/health")
 async def health_check():
-    return {
-        "status": "healthy",
-        "anthropic_api": "ok" if ANTHROPIC_API_KEY else "missing",
-    }
+    from app.core.config import ANTHROPIC_API_KEY
+    return {"status": "healthy", "anthropic_api": "ok" if ANTHROPIC_API_KEY else "missing"}

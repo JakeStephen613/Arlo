@@ -1,63 +1,113 @@
-
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display&display=swap");
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Surface */
+    --background: 40 33% 96%;          /* #F7F5EF warm cream */
+    --foreground: 0 0% 10%;            /* #1A1A1A */
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 0 0% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222.2 84% 4.9%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222.2 84% 4.9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+    --popover-foreground: 0 0% 10%;
+
+    /* Primary — forest green */
+    --primary: 150 33% 18%;            /* #1F3D2B */
+    --primary-foreground: 40 33% 96%;
+
+    /* Secondary */
+    --secondary: 40 18% 93%;           /* warm light gray */
+    --secondary-foreground: 0 0% 10%;
+
+    /* Muted */
+    --muted: 40 18% 93%;
+    --muted-foreground: 220 9% 46%;
+
+    /* Accent — moss/sage green */
+    --accent: 119 22% 45%;             /* #5B8C5A */
+    --accent-foreground: 0 0% 100%;
+    --accent-light: 120 20% 92%;       /* #E8F0E8 */
+
+    /* Destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Border */
+    --border: 40 14% 87%;              /* #E5E2DA warm gray */
+    --border-strong: 40 10% 80%;
+    --input: 40 14% 87%;
+    --ring: 150 33% 18%;
+
+    /* Charts */
+    --chart-1: 150 33% 18%;
+    --chart-2: 119 22% 45%;
+    --chart-3: 40 50% 55%;
+    --chart-4: 200 40% 50%;
+    --chart-5: 0 60% 55%;
+
+    /* Radius */
     --radius: 0.5rem;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 2px 8px rgba(0,0,0,0.08);
+
+    /* Sidebar */
+    --sidebar-background: 150 33% 18%;
+    --sidebar-foreground: 40 33% 96%;
+    --sidebar-primary: 40 33% 96%;
+    --sidebar-primary-foreground: 150 33% 18%;
+    --sidebar-accent: 150 28% 25%;
+    --sidebar-accent-foreground: 40 33% 96%;
+    --sidebar-border: 150 20% 25%;
+    --sidebar-ring: 119 22% 45%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+    --background: 150 30% 8%;          /* #0F1A13 green-tinted near-black */
+    --foreground: 40 10% 90%;          /* #EAEAE7 */
+    --card: 150 25% 12%;               /* #1A2820 */
+    --card-foreground: 40 10% 90%;
+    --popover: 150 25% 12%;
+    --popover-foreground: 40 10% 90%;
+
+    --primary: 130 22% 71%;            /* #A3C9A8 light sage */
+    --primary-foreground: 150 30% 8%;
+
+    --secondary: 150 15% 15%;
+    --secondary-foreground: 40 10% 90%;
+
+    --muted: 150 15% 15%;
+    --muted-foreground: 220 9% 60%;
+
+    --accent: 119 22% 45%;
+    --accent-foreground: 40 10% 90%;
+    --accent-light: 140 20% 12%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 40 10% 90%;
+
+    --border: 150 15% 18%;
+    --border-strong: 150 15% 25%;
+    --input: 150 15% 18%;
+    --ring: 130 22% 71%;
+
+    --chart-1: 130 22% 71%;
+    --chart-2: 119 30% 55%;
+    --chart-3: 40 50% 55%;
+    --chart-4: 200 40% 50%;
+    --chart-5: 340 60% 55%;
+
+    --sidebar-background: 150 30% 6%;
+    --sidebar-foreground: 40 10% 90%;
+    --sidebar-primary: 130 22% 71%;
+    --sidebar-primary-foreground: 150 30% 6%;
+    --sidebar-accent: 150 20% 14%;
+    --sidebar-accent-foreground: 40 10% 90%;
+    --sidebar-border: 150 15% 15%;
+    --sidebar-ring: 119 22% 45%;
   }
 }
 
@@ -66,8 +116,18 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
-    font-family: "Inter", sans-serif;
+    @apply bg-background text-foreground antialiased;
+    font-family: "DM Sans", system-ui, sans-serif;
+  }
+  h1, h2, h3 {
+    letter-spacing: -0.01em;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: hsl(var(--primary) / 0.15);
   }
 }
 
@@ -75,24 +135,23 @@
   .perspective-1000 {
     perspective: 1000px;
   }
-  
+
   .preserve-3d {
     transform-style: preserve-3d;
   }
-  
+
   .backface-hidden {
     backface-visibility: hidden;
   }
-  
+
   .rotate-y-180 {
     transform: rotateY(180deg);
   }
 
-  /* Custom shimmer animation for skeleton loaders */
   .shimmer {
-    background: linear-gradient(90deg, 
-      hsl(var(--muted)) 25%, 
-      hsl(var(--muted) / 0.5) 50%, 
+    background: linear-gradient(90deg,
+      hsl(var(--muted)) 25%,
+      hsl(var(--muted) / 0.5) 50%,
       hsl(var(--muted)) 75%
     );
     background-size: 200% 100%;
@@ -100,25 +159,7 @@
   }
 
   @keyframes shimmer {
-    0% {
-      background-position: -200% 0;
-    }
-    100% {
-      background-position: 200% 0;
-    }
-  }
-
-  /* Enhanced bounce animation for ARLO mascot */
-  .animate-gentle-bounce {
-    animation: gentle-bounce 3s infinite;
-  }
-
-  @keyframes gentle-bounce {
-    0%, 100% {
-      transform: translateY(0);
-    }
-    50% {
-      transform: translateY(-4px);
-    }
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
   }
 }

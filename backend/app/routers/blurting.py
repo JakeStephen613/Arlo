@@ -1,35 +1,57 @@
+"""Blurting mode — generates recall exercises, grades via Haiku rubric.
+
+Consumes TutorBriefing, grades blurted responses 0-1, calls record_attempt().
+"""
+from __future__ import annotations
+
+import json
+import logging
+from typing import List, Optional
+from uuid import UUID
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from typing import Optional, List
-from app.services.llm import client
-import json
-import asyncio
-import logging
 
-from app.services.context import get_cached_context_fast
+from app.services.llm import call_messages
+from app.services.learner_context import (
+    get_tutor_briefing,
+    record_attempt,
+    ensure_concept,
+    AttemptRecord,
+)
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
-# ------------------- MODELS -------------------
-class BlurtingExerciseRequest(BaseModel):
-    teaching_block: str
-    user_id: Optional[str] = None
+
+# ── Models ─────────────────────────────────────────────────────
+
 
 class ExerciseItem(BaseModel):
     prompt: str
     focus: str
+
+
+class BlurtingExerciseRequest(BaseModel):
+    teaching_block: str
+    user_id: Optional[str] = None
+    concept_name: Optional[str] = None
+    topic: Optional[str] = None
+
 
 class BlurtingExerciseResponse(BaseModel):
     exercise_1: ExerciseItem
     exercise_2: ExerciseItem
     exercise_3: ExerciseItem
 
+
 class BlurtingFeedbackRequest(BaseModel):
     exercise_question: str
     blurted_response: str
     user_id: Optional[str] = None
+    concept_name: Optional[str] = None
+    topic: Optional[str] = None
+
 
 class BlurtingFeedbackResponse(BaseModel):
     mentioned: List[str]
@@ -38,320 +60,120 @@ class BlurtingFeedbackResponse(BaseModel):
     mentioned_count: int
     total_key_concepts: int
     score_fraction: str
+    score: float
     feedback: str
 
-# ------------------- JSON SCHEMAS FOR STRUCTURED OUTPUTS -------------------
-BLURTING_EXERCISES_SCHEMA = {
-    "name": "blurting_exercises_response",
-    "schema": {
-        "type": "object",
-        "strict": True,
-        "properties": {
-            "exercise_1": {
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string", "minLength": 10},
-                    "focus": {"type": "string", "minLength": 10}
-                },
-                "required": ["prompt", "focus"],
-                "additionalProperties": False
-            },
-            "exercise_2": {
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string", "minLength": 10},
-                    "focus": {"type": "string", "minLength": 10}
-                },
-                "required": ["prompt", "focus"],
-                "additionalProperties": False
-            },
-            "exercise_3": {
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string", "minLength": 10},
-                    "focus": {"type": "string", "minLength": 10}
-                },
-                "required": ["prompt", "focus"],
-                "additionalProperties": False
-            }
-        },
-        "required": ["exercise_1", "exercise_2", "exercise_3"],
-        "additionalProperties": False
-    }
-}
 
-BLURTING_FEEDBACK_SCHEMA = {
-    "name": "blurting_feedback_response",
-    "schema": {
-        "type": "object",
-        "strict": True,
-        "properties": {
-            "mentioned": {
-                "type": "array",
-                "items": {"type": "string", "minLength": 1}
-            },
-            "partial_mentions": {
-                "type": "array",
-                "items": {"type": "string", "minLength": 1}
-            },
-            "missed": {
-                "type": "array",
-                "items": {"type": "string", "minLength": 1}
-            },
-            "mentioned_count": {"type": "integer", "minimum": 0},
-            "total_key_concepts": {"type": "integer", "minimum": 1},
-            "score_fraction": {"type": "string", "pattern": "^\\d+/\\d+$"},
-            "feedback": {"type": "string", "minLength": 20}
-        },
-        "required": ["mentioned", "partial_mentions", "missed", "mentioned_count", "total_key_concepts", "score_fraction", "feedback"],
-        "additionalProperties": False
-    }
-}
+# ── Helpers ────────────────────────────────────────────────────
 
-# ------------------- USER ID EXTRACTION -------------------
-def extract_user_id(request: Request, data) -> str:
-    user_info = getattr(request.state, "user", None)
-    if user_info and "sub" in user_info:
-        return user_info["sub"]
-    elif request.headers.get("x-user-id"):
+
+def _get_user_id(request: Request, fallback: Optional[str] = None) -> str:
+    user = getattr(request.state, "user", {})
+    uid = user.get("sub")
+    if uid:
+        return uid
+    if request.headers.get("x-user-id"):
         return request.headers["x-user-id"]
-    elif hasattr(data, 'user_id') and data.user_id:
-        return data.user_id
-    else:
-        raise HTTPException(status_code=400, detail="Missing user_id in request")
+    if fallback:
+        return fallback
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
-# ------------------- CONTEXT LOGGING -------------------
-async def post_learning_event_async(user_id: str, exercise_question: str, missed_concepts: List[str], feedback: str, score_fraction: str):
-    """Async context posting with timeout protection"""
-    topic = exercise_question.split('.')[0][:100] if exercise_question else "Blurting Exercise"
-    
-    mentioned_count = int(score_fraction.split('/')[0]) if '/' in score_fraction else 0
-    total_count = int(score_fraction.split('/')[1]) if '/' in score_fraction else 1
-    score_ratio = mentioned_count / total_count if total_count > 0 else 0
-    
-    payload = {
-        "source": "blurting",
-        "user_id": user_id,
-        "current_topic": topic,
-        "weak_areas": missed_concepts[:3],
-        "review_queue": missed_concepts[:3],
-        "learning_event": {
-            "concept": topic,
-            "phase": "blurting",
-            "confidence": 0.9 if score_ratio >= 0.8 else 0.7 if score_ratio >= 0.6 else 0.5 if score_ratio >= 0.4 else 0.3,
-            "depth": "deep" if score_ratio >= 0.8 else "intermediate" if score_ratio >= 0.5 else "shallow",
-            "source_summary": feedback[:150],
-            "repetition_count": 1,
-            "review_scheduled": True,
-            "score": score_fraction
-        }
-    }
-    
-    try:
-        import httpx
-        from app.core.config import CONTEXT_API_BASE
-        async with httpx.AsyncClient(timeout=10.0) as http:
-            await http.post(f"{CONTEXT_API_BASE}/api/context/update", json=payload)
-    except Exception as e:
-        logger.warning("Context log failed: %s", e)
 
-# ------------------- SYSTEM PROMPTS -------------------
-EXERCISE_SYSTEM_PROMPT = """You are an expert learning scientist designing optimal blurting exercises based on teaching content.
+EXERCISE_SYSTEM = """Design 3 blurting exercises from teaching content.
+Exercise 1: factual recall (definitions, specific details)
+Exercise 2: process/sequence recall (steps, cause-effect)
+Exercise 3: conceptual understanding (relationships, comparisons)
+Return JSON: {"exercises": [{"prompt": "...", "focus": "..."}, ...]}"""
 
-BLURTING TECHNIQUE: Students recall information from memory without looking at materials. Most effective for:
-- Factual information (dates, names, definitions)
-- Sequential processes (steps, procedures)
-- Lists and categorizations
-- Detailed explanations of concepts
+FEEDBACK_SYSTEM = """Evaluate a student's blurting response.
+Identify key concepts from the question, categorize recall into mentioned/partial/missed.
+Return JSON: {"mentioned": [...], "partial_mentions": [...], "missed": [...],
+"mentioned_count": int, "total_key_concepts": int, "score_fraction": "N/M", "feedback": "..."}
+Be encouraging, acknowledge what they got right."""
 
-EXAMPLE INPUT:
-Teaching Block: "DNA replication is the process by which a cell copies its DNA before cell division. It occurs during the S-phase of the cell cycle, inside the nucleus in eukaryotic cells. The process is semi-conservative, meaning each daughter strand retains one original strand. Replication begins at multiple origins of replication. Helicase unwinds the DNA, while topoisomerase relieves torsional strain. Primase lays down RNA primers to initiate synthesis. DNA Polymerase III extends new strands in the 5' to 3' direction. DNA is synthesized continuously on the leading strand and in short segments (Okazaki fragments) on the lagging strand. DNA Polymerase I replaces RNA primers with DNA, and DNA Ligase seals the fragments."
 
-EXAMPLE OUTPUT STRUCTURE:
-exercise_1:
-  prompt: "List all the enzymes involved in DNA replication and describe what each one does."
-  focus: "Factual recall of specific proteins and their functions"
-exercise_2:
-  prompt: "Describe the step-by-step process of DNA replication from initiation to completion."
-  focus: "Sequential process recall and chronological understanding"
-exercise_3:
-  prompt: "Explain the differences between leading and lagging strand synthesis, including why Okazaki fragments form."
-  focus: "Conceptual understanding of directional synthesis differences"
+# ── Endpoints ──────────────────────────────────────────────────
 
-Create 3 distinct exercises targeting different memory retrieval patterns:
-EXERCISE 1: Focus on detailed recall (facts, definitions, specific examples)
-EXERCISE 2: Focus on process/sequence recall (steps, cause-effect, chronology)  
-EXERCISE 3: Focus on conceptual understanding (relationships, comparisons, explanations)
 
-Make prompts specific and actionable."""
-
-FEEDBACK_SYSTEM_PROMPT = """You are an expert educational assessor evaluating a student's blurting exercise response.
-
-EVALUATION PROCESS:
-1. Analyze the exercise question to identify ALL key concepts that should be included
-2. Compare the student's response against these key concepts
-3. Categorize performance into: MENTIONED, PARTIAL MENTIONS, MISSED
-
-EXAMPLE INPUT:
-Exercise Question: "List all the enzymes involved in DNA replication and describe what each one does."
-
-Key concepts for this question:
-- Helicase (unwinds DNA)
-- Topoisomerase (relieves torsional strain)
-- Primase (synthesizes RNA primers)
-- DNA Polymerase III (extends new strands)
-- DNA Polymerase I (replaces RNA primers with DNA)
-- DNA Ligase (seals DNA fragments)
-
-Student Response: "DNA polymerase extends the new strand, helicase unwinds DNA, topoisomerase relieves tension. There's also primase that makes primers. I think ligase does something too but I'm not sure what."
-
-EXAMPLE OUTPUT STRUCTURE:
-mentioned: [
-  "DNA polymerase - extends new strand",
-  "Helicase - unwinds DNA", 
-  "Topoisomerase - relieves tension",
-  "Primase - makes primers"
-]
-partial_mentions: [
-  "DNA Ligase (mentioned but function unclear)"
-]
-missed: [
-  "DNA Polymerase I vs III distinction",
-  "Ligase specific function (seals DNA fragments)",
-  "RNA primer specification"
-]
-mentioned_count: 4
-total_key_concepts: 6
-score_fraction: "4/6"
-feedback: "Great job recalling the major enzymes! You correctly identified DNA polymerase, helicase, topoisomerase, and primase with their basic functions. You mentioned ligase but weren't sure about its function - it seals DNA fragments together. Try to be more specific about DNA polymerase types (I vs III) and remember that primers are specifically RNA primers."
-
-Extract key concepts ONLY from what the specific exercise question asks for. Give encouraging feedback that acknowledges what they got right."""
-
-# ------------------- ENDPOINTS -------------------
 @router.post("/blurting/exercises", response_model=BlurtingExerciseResponse)
 async def generate_blurting_exercises(request: Request, data: BlurtingExerciseRequest):
-    """Generate blurting exercises from teaching content"""
+    user_id = _get_user_id(request, data.user_id)
+
+    briefing_ctx = ""
     try:
-        user_id = extract_user_id(request, data)
-        
-        # Get context
-        context_result = await get_cached_context_fast(user_id)
-        context = context_result.get("context", {})
-        
-        # Build user prompt
-        weak_areas = context.get("weak_areas", [])
-        weak_areas_text = f"\n\nSTUDENT'S WEAK AREAS (prioritize these): {', '.join(weak_areas)}" if weak_areas else ""
-        
-        user_prompt = f"""TEACHING CONTENT:
-{data.teaching_block[:1200]}
-{weak_areas_text}
+        briefing = get_tutor_briefing(user_id)
+        if briefing.weak_concepts:
+            weak = ", ".join(c.name for c in briefing.weak_concepts[:3])
+            briefing_ctx = f"\nStudent weak areas (prioritize): {weak}"
+    except Exception:
+        pass
 
-Create 3 distinct blurting exercises targeting different memory retrieval patterns."""
+    messages = [
+        {"role": "system", "content": EXERCISE_SYSTEM},
+        {"role": "user", "content": f"Teaching content:\n{data.teaching_block[:1200]}{briefing_ctx}"},
+    ]
 
-        # Prepare messages
-        messages = [
-            {"role": "system", "content": EXERCISE_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Make API call with structured outputs
-        response = client.chat.completions.create(
-            messages=messages,
-            response_format={
-                "type": "json_schema",
-                "json_schema": BLURTING_EXERCISES_SCHEMA
-            },
-            reasoning_effort="low"
-        )
+    text = call_messages(messages, response_format={"type": "json_object"}, max_tokens=2000)
 
-        # Parse the guaranteed valid JSON response
-        raw_content = response.choices[0].message.content
-        parsed_data = json.loads(raw_content)
-
-        # Convert to Pydantic models
-        return BlurtingExerciseResponse(
-            exercise_1=ExerciseItem(
-                prompt=parsed_data["exercise_1"]["prompt"],
-                focus=parsed_data["exercise_1"]["focus"]
-            ),
-            exercise_2=ExerciseItem(
-                prompt=parsed_data["exercise_2"]["prompt"],
-                focus=parsed_data["exercise_2"]["focus"]
-            ),
-            exercise_3=ExerciseItem(
-                prompt=parsed_data["exercise_3"]["prompt"],
-                focus=parsed_data["exercise_3"]["focus"]
-            )
-        )
-        
+    try:
+        parsed = json.loads(text)
+        exercises = parsed.get("exercises", [])
+        while len(exercises) < 3:
+            exercises.append({"prompt": "Recall key concepts.", "focus": "General recall"})
     except Exception as e:
-        logger.exception("Exercise generation error")
-        raise HTTPException(status_code=500, detail="Exercise generation failed")
+        logger.error("Blurting exercise parse failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to generate exercises")
+
+    return BlurtingExerciseResponse(
+        exercise_1=ExerciseItem(**exercises[0]),
+        exercise_2=ExerciseItem(**exercises[1]),
+        exercise_3=ExerciseItem(**exercises[2]),
+    )
+
 
 @router.post("/blurting/feedback", response_model=BlurtingFeedbackResponse)
 async def evaluate_blurting_feedback(request: Request, data: BlurtingFeedbackRequest):
-    """Evaluate blurting response against the exercise question"""
+    user_id = _get_user_id(request, data.user_id)
+
+    messages = [
+        {"role": "system", "content": FEEDBACK_SYSTEM},
+        {
+            "role": "user",
+            "content": f"Exercise question: {data.exercise_question}\n\nStudent's response:\n{data.blurted_response[:800]}",
+        },
+    ]
+
+    text = call_messages(messages, response_format={"type": "json_object"}, max_tokens=2000)
+
     try:
-        user_id = extract_user_id(request, data)
-        
-        # Get context
-        context_result = await get_cached_context_fast(user_id)
-        context_prompt = None
-        if context_result["context"]:
-            weak_areas = context_result["context"].get("weak_areas", [])
-            context_prompt = f"Focus on these concepts: {', '.join(weak_areas[:3])}" if weak_areas else None
-
-        # Build user prompt
-        context_section = f"\n\nStudent's learning context (weak areas to focus on):\n{context_prompt}" if context_prompt else ""
-        
-        user_prompt = f"""EXERCISE QUESTION (what the student was asked to recall):
-{data.exercise_question}
-
-STUDENT'S BLURTED RESPONSE:
-{data.blurted_response[:800]}
-{context_section}
-
-Evaluate the student's performance by identifying key concepts from the question and categorizing their recall."""
-
-        # Prepare messages
-        messages = [
-            {"role": "system", "content": FEEDBACK_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Make API call with structured outputs
-        response = client.chat.completions.create(
-            messages=messages,
-            response_format={
-                "type": "json_schema",
-                "json_schema": BLURTING_FEEDBACK_SCHEMA
-            },
-            reasoning_effort="low"
-        )
-
-        # Parse the guaranteed valid JSON response
-        raw_content = response.choices[0].message.content
-        parsed_data = json.loads(raw_content)
-
-        # Fire-and-forget context logging
-        asyncio.create_task(post_learning_event_async(
-            user_id,
-            data.exercise_question,
-            parsed_data["missed"],
-            parsed_data["feedback"],
-            parsed_data["score_fraction"]
-        ))
-
-        return BlurtingFeedbackResponse(
-            mentioned=parsed_data["mentioned"],
-            partial_mentions=parsed_data["partial_mentions"], 
-            missed=parsed_data["missed"],
-            mentioned_count=parsed_data["mentioned_count"],
-            total_key_concepts=parsed_data["total_key_concepts"],
-            score_fraction=parsed_data["score_fraction"],
-            feedback=parsed_data["feedback"]
-        )
-
+        parsed = json.loads(text)
+        mentioned_count = int(parsed.get("mentioned_count", 0))
+        total = int(parsed.get("total_key_concepts", 1))
+        score = mentioned_count / total if total > 0 else 0.0
     except Exception as e:
-        logger.exception("Blurting feedback error")
-        raise HTTPException(status_code=500, detail="Feedback evaluation service error")
+        logger.error("Blurting feedback parse failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to evaluate response")
+
+    # Record attempt
+    if data.concept_name:
+        try:
+            concept_id = ensure_concept(data.concept_name, data.topic)
+            record_attempt(AttemptRecord(
+                user_id=UUID(user_id),
+                concept_id=UUID(concept_id),
+                mode="blurting",
+                score=score,
+            ))
+        except Exception as e:
+            logger.warning("Failed to record blurting attempt: %s", e)
+
+    return BlurtingFeedbackResponse(
+        mentioned=parsed.get("mentioned", []),
+        partial_mentions=parsed.get("partial_mentions", []),
+        missed=parsed.get("missed", []),
+        mentioned_count=mentioned_count,
+        total_key_concepts=total,
+        score_fraction=parsed.get("score_fraction", f"{mentioned_count}/{total}"),
+        score=round(score, 3),
+        feedback=parsed.get("feedback", ""),
+    )
