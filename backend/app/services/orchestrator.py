@@ -9,6 +9,7 @@ only used for qualitative generation (teaching content, grading rubrics).
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from enum import Enum
@@ -125,6 +126,22 @@ def create_session(
     config = INTENT_CONFIG[intent]
 
     concepts = _select_session_concepts(briefing, intent, topic)
+
+    # If no concepts exist yet, bootstrap from the topic
+    if not concepts and topic:
+        concept_id = ensure_concept(topic, topic)
+        concepts = [ConceptSnapshot(
+            concept_id=UUID(concept_id), name=topic, topic=topic,
+            mastery=0.0, uncertainty=1.0, streak=0, priority=1.0,
+        )]
+    elif not concepts:
+        fallback_name = "General Knowledge"
+        concept_id = ensure_concept(fallback_name)
+        concepts = [ConceptSnapshot(
+            concept_id=UUID(concept_id), name=fallback_name,
+            mastery=0.0, uncertainty=1.0, streak=0, priority=1.0,
+        )]
+
     steps = _build_step_sequence(concepts, config, intent)
 
     plan = SessionPlan(
@@ -384,13 +401,15 @@ def _persist_session(plan: SessionPlan) -> None:
     try:
         from app.services.context import get_supabase
         supabase = get_supabase()
+        plan_json = json.loads(json.dumps(
+            {"steps": [s.dict() for s in plan.steps]},
+            default=str,
+        ))
         supabase.table("sessions").insert({
             "id": str(plan.session_id),
             "user_id": str(plan.user_id),
             "intent": plan.intent.value,
-            "plan": {
-                "steps": [s.dict() for s in plan.steps],
-            },
+            "plan": plan_json,
             "started_at": plan.started_at.isoformat(),
         }).execute()
     except Exception as e:
@@ -437,9 +456,10 @@ def _finish_session(plan: SessionPlan) -> NextStepResponse:
     try:
         from app.services.context import get_supabase
         supabase = get_supabase()
+        outcomes_json = json.loads(json.dumps(summary.dict(), default=str))
         supabase.table("sessions").update({
             "ended_at": plan.ended_at.isoformat(),
-            "outcomes": summary.dict(),
+            "outcomes": outcomes_json,
         }).eq("id", str(plan.session_id)).execute()
     except Exception as e:
         logger.error("Failed to update session: %s", e)
