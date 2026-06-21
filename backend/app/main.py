@@ -32,7 +32,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 request.state.user = decoded
             except Exception as e:
                 logger.warning("JWT decode failed: %s", e)
-                request.state.user = {}
+                from starlette.responses import JSONResponse
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid or expired token"},
+                )
         else:
             request.state.user = {}
         return await call_next(request)

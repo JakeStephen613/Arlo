@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   TrendingUp,
   TrendingDown,
@@ -6,11 +7,14 @@ import {
   BarChart3,
   Calendar,
   Target,
+  Clock,
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { apiGet } from '@/lib/apiClient';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
+import { fetchSessionHistory, SessionHistoryItem } from '@/services/sessionApi';
 
 interface ConceptSnapshot {
   concept_id: string;
@@ -41,15 +45,27 @@ interface TutorBriefing {
 }
 
 export default function ProgressPage() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const [briefing, setBriefing] = useState<TutorBriefing | null>(null);
+  const [sessions, setSessions] = useState<SessionHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiGet<TutorBriefing>('/learner/briefing')
-      .then(setBriefing)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+    const load = async () => {
+      try {
+        const [b, s] = await Promise.all([
+          apiGet<TutorBriefing>('/learner/briefing').catch(() => null),
+          user ? fetchSessionHistory(user.id).catch(() => []) : Promise.resolve([]),
+        ]);
+        setBriefing(b);
+        setSessions(s);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [user]);
 
   if (loading) {
     return (
@@ -81,7 +97,17 @@ export default function ProgressPage() {
           <div className="grid gap-4 sm:grid-cols-3">
             <StatCard icon={<Target className="w-4 h-4" />} label="Average mastery" value={`${Math.round(b!.average_mastery * 100)}%`} />
             <StatCard icon={<BarChart3 className="w-4 h-4" />} label="Concepts tracked" value={b!.total_concepts} />
-            <StatCard icon={<Calendar className="w-4 h-4" />} label="Due for review" value={b!.due_reviews.length} accent={b!.due_reviews.length > 0} />
+            <StatCard
+              icon={<Calendar className="w-4 h-4" />}
+              label="Due for review"
+              value={b!.due_reviews.length}
+              accent={b!.due_reviews.length > 0}
+              action={b!.due_reviews.length > 0 ? () => {
+                const topics = b!.due_reviews.map(r => r.name).join(', ');
+                navigate('/session', { state: { prefillTopic: `Review: ${topics}` } });
+              } : undefined}
+              actionLabel="Review now"
+            />
           </div>
 
           {/* All concepts mastery breakdown */}
@@ -144,15 +170,63 @@ export default function ProgressPage() {
           )}
         </>
       )}
+
+      {/* Session history */}
+      {sessions.length > 0 && (
+        <div className="rounded-lg border bg-card p-5">
+          <h3 className="text-sm font-medium text-foreground mb-4">Session history</h3>
+          <div className="space-y-2">
+            {sessions.slice(0, 10).map(s => (
+              <SessionHistoryRow key={s.id} session={s} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function StatCard({ icon, label, value, accent }: {
+function SessionHistoryRow({ session: s }: { session: SessionHistoryItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasReview = s.review_sheet && typeof s.review_sheet === 'object' && Object.keys(s.review_sheet as object).length > 0;
+
+  return (
+    <div className="border-b border-border/50 last:border-0">
+      <button
+        onClick={() => hasReview && setExpanded(!expanded)}
+        className={cn(
+          'w-full flex items-center justify-between text-sm py-2',
+          hasReview && 'cursor-pointer hover:bg-secondary/50 -mx-2 px-2 rounded'
+        )}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          <span className="text-foreground font-medium truncate">{s.topic}</span>
+          {hasReview && <Badge variant="outline" className="text-[10px] px-1.5 py-0">review sheet</Badge>}
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <span className="text-xs text-muted-foreground">{s.duration} min</span>
+          <span className="text-xs text-muted-foreground">
+            {new Date(s.timestamp).toLocaleDateString()}
+          </span>
+        </div>
+      </button>
+      {expanded && hasReview && (
+        <div className="pb-3 pl-6 text-sm text-muted-foreground whitespace-pre-wrap">
+          {typeof s.review_sheet === 'string' ? s.review_sheet : JSON.stringify(s.review_sheet, null, 2)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ icon, label, value, accent, action, actionLabel }: {
   icon: React.ReactNode;
   label: string;
   value: string | number;
   accent?: boolean;
+  action?: () => void;
+  actionLabel?: string;
 }) {
   return (
     <div className="rounded-lg border bg-card p-4">
@@ -163,6 +237,11 @@ function StatCard({ icon, label, value, accent }: {
       <p className={`text-2xl font-semibold tracking-tight ${accent ? 'text-accent' : 'text-foreground'}`}>
         {value}
       </p>
+      {action && (
+        <button onClick={action} className="mt-2 text-xs text-primary hover:underline font-medium">
+          {actionLabel}
+        </button>
+      )}
     </div>
   );
 }

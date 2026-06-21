@@ -54,9 +54,14 @@ class QuizResponse(BaseModel):
     estimated_time_minutes: int
 
 
+class GradeAnswer(BaseModel):
+    user_answer: str
+    correct_answer: str
+
+
 class GradeRequest(BaseModel):
     quiz_id: str
-    answers: dict[int, str]
+    answers: dict[int, GradeAnswer]
     concept_name: Optional[str] = None
     topic: Optional[str] = None
     user_id: Optional[str] = None
@@ -154,10 +159,10 @@ async def grade_quiz(req: GradeRequest, request: Request):
     results = []
 
     for qid, answer in req.answers.items():
-        is_correct = False  # would need stored questions; placeholder
+        is_correct = answer.user_answer.strip().lower() == answer.correct_answer.strip().lower()
         score = 1.0 if is_correct else 0.0
         correct += int(is_correct)
-        results.append({"question_id": qid, "correct": is_correct, "user_answer": answer})
+        results.append({"question_id": qid, "correct": is_correct, "user_answer": answer.user_answer})
 
         if concept_id:
             record_attempt(AttemptRecord(

@@ -31,7 +31,7 @@ const NAV_ITEMS = [
 export default function AppShell({ children }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, signOut } = useAuth();
+  const { user, userProfile, signOut } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
 
@@ -135,7 +135,7 @@ function SidebarContent({ currentPath, onNavigate, onClose, onOpenCommand, userE
       </div>
 
       <div className="flex-1 py-3 px-2 space-y-0.5">
-        {NAV_ITEMS.map(item => {
+        {NAV_ITEMS.filter(item => item.path !== '/tutor' || userProfile?.account_mode === 'tutor').map(item => {
           const active = item.path === '/' ? currentPath === '/' : currentPath.startsWith(item.path);
           return (
             <button

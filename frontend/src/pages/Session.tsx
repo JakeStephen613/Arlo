@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowRight,
   Check,
@@ -65,10 +65,13 @@ interface BlockScore {
 
 export default function Session() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const prefillTopic = (location.state as any)?.prefillTopic || '';
 
   const [phase, setPhase] = useState<SessionPhase>('input');
-  const [topic, setTopic] = useState('');
+  const [topic, setTopic] = useState(prefillTopic);
   const [duration, setDuration] = useState(60);
+  const [pdfContent, setPdfContent] = useState<string | null>(null);
   const [plan, setPlan] = useState<StudyPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,14 +82,14 @@ export default function Session() {
   const [preloadedContent, setPreloadedContent] = useState<Record<string, boolean>>({});
 
   const generatePlan = async () => {
-    if (!topic.trim()) return;
+    if (!topic.trim() && !pdfContent) return;
     setPhase('generating');
     setError(null);
     try {
-      const result = await apiPost<StudyPlan>('/study-session', {
-        objective: topic,
-        duration,
-      }, 60000);
+      const payload: Record<string, unknown> = { duration };
+      if (topic.trim()) payload.objective = topic;
+      if (pdfContent) payload.parsed_summary = pdfContent;
+      const result = await apiPost<StudyPlan>('/study-session', payload, 60000);
       setPlan(result);
       setPhase('plan-review');
     } catch (e: any) {
@@ -142,6 +145,8 @@ export default function Session() {
           setTopic={setTopic}
           duration={duration}
           setDuration={setDuration}
+          onPdfParsed={setPdfContent}
+          pdfContent={pdfContent}
           onSubmit={generatePlan}
         />
       )}
@@ -199,19 +204,46 @@ function expandBlocks(blocks: StudyBlock[]): ExpandedSubBlock[] {
 
 const DURATION_OPTIONS = [30, 60, 90, 120];
 
-function TopicInput({ topic, setTopic, duration, setDuration, onSubmit }: {
+function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfContent, onSubmit }: {
   topic: string;
   setTopic: (t: string) => void;
   duration: number;
   setDuration: (d: number) => void;
+  onPdfParsed: (content: string | null) => void;
+  pdfContent: string | null;
   onSubmit: () => void;
 }) {
+  const [uploading, setUploading] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.endsWith('.pdf')) return;
+    setUploading(true);
+    setFileName(file.name);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const base = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:10000'}/api`;
+      const res = await fetch(`${base}/pdf/parse`, { method: 'POST', body: formData });
+      if (!res.ok) throw new Error('Parse failed');
+      const data = await res.json();
+      onPdfParsed(data.summary || data.text || '');
+    } catch {
+      setFileName(null);
+      onPdfParsed(null);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="flex-1 flex items-center justify-center py-8">
       <div className="max-w-lg mx-auto w-full space-y-8">
         <div className="text-center">
           <h1 className="font-display text-3xl font-bold tracking-tight text-foreground">Start a study session</h1>
-          <p className="text-muted-foreground mt-2">Enter a topic and Arlo will build a structured curriculum for you.</p>
+          <p className="text-muted-foreground mt-2">Enter a topic or upload study materials and Arlo will build a structured curriculum for you.</p>
         </div>
 
         <div className="space-y-5">
@@ -219,11 +251,29 @@ function TopicInput({ topic, setTopic, duration, setDuration, onSubmit }: {
             type="text"
             value={topic}
             onChange={e => setTopic(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && topic.trim()) onSubmit(); }}
+            onKeyDown={e => { if (e.key === 'Enter' && (topic.trim() || pdfContent)) onSubmit(); }}
             placeholder="e.g. Cell Biology, Linear Algebra, World War 2..."
             className="w-full rounded-xl border-2 bg-card px-4 py-3.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors text-center text-lg"
             autoFocus
           />
+
+          <div className="flex items-center justify-center">
+            <label className={cn(
+              'cursor-pointer rounded-lg border border-dashed px-4 py-2.5 text-sm transition-colors',
+              fileName ? 'border-primary/50 bg-primary/5 text-foreground' : 'border-muted-foreground/30 text-muted-foreground hover:border-primary/30'
+            )}>
+              {uploading ? 'Parsing...' : fileName ? `${fileName}` : 'Upload PDF (optional)'}
+              <input type="file" accept=".pdf" onChange={handleFileUpload} className="hidden" />
+            </label>
+            {fileName && (
+              <button
+                onClick={() => { setFileName(null); onPdfParsed(null); }}
+                className="ml-2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
 
           <div>
             <p className="text-sm text-muted-foreground mb-2 text-center">Session duration</p>
@@ -247,7 +297,7 @@ function TopicInput({ topic, setTopic, duration, setDuration, onSubmit }: {
 
           <button
             onClick={onSubmit}
-            disabled={!topic.trim()}
+            disabled={!topic.trim() && !pdfContent}
             className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
           >
             Generate Study Plan

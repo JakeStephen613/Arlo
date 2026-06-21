@@ -156,6 +156,9 @@ def get_tutor_briefing(user_id: str) -> TutorBriefing:
     snapshots: list[ConceptSnapshot] = []
     for row in rows:
         concept_info = row.get("concepts", {}) or {}
+        name = concept_info.get("name", "Unknown")
+        if name == "General Knowledge":
+            continue
         priority = concept_priority_score(
             mastery=row["mastery"],
             uncertainty=row["uncertainty"],

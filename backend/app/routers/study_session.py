@@ -10,7 +10,7 @@ from slowapi.util import get_remote_address
 
 limiter = Limiter(key_func=get_remote_address)
 from pydantic import BaseModel, Field
-from app.services.llm import client
+from app.services.llm import call_messages
 import httpx
 
 from app.core.config import CONTEXT_API_BASE
@@ -290,19 +290,19 @@ async def update_context_async(payload: dict) -> bool:
         return False
 
 # --- Claude call wrapper --- #
-def _call_model_and_get_parsed(input_messages: List[Dict[str, Any]], max_tokens: int = 4000):
-    """Call Responses API and parse into StudyPlanOutput (strict schema)."""
-    return client.responses.parse(
-        input=input_messages,
-        text_format=StudyPlanOutput,
-        reasoning={"effort": "low"},
-        instructions=(
-            "Create focused study plans with exactly the requested number of blocks. "
-            "Each block must focus on ONE substantial, complete topic that justifies the allocated time. "
-            "Break subjects into major component areas, not overly narrow sub-details."
-        ),
-        max_output_tokens=max_tokens
+def _call_model_and_get_parsed(input_messages: List[Dict[str, Any]], max_tokens: int = 4000) -> StudyPlanOutput:
+    """Call Claude via call_messages with JSON schema enforcement, return parsed StudyPlanOutput."""
+    schema = StudyPlanOutput.model_json_schema()
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {"name": "study_plan", "schema": schema},
+    }
+    raw = call_messages(
+        input_messages,
+        max_tokens=max_tokens,
+        response_format=response_format,
     )
+    return StudyPlanOutput.model_validate_json(raw)
 
 def generate_gpt_plan(
     prompt: str,
@@ -320,20 +320,14 @@ def generate_gpt_plan(
         {"role": "user", "content": prompt},
     ]
 
-    response = _call_model_and_get_parsed(input_messages)
-
-    if getattr(response, "output_parsed", None) is None:
-        if hasattr(response, "refusal") and response.refusal:
-            raise RuntimeError(f"Model refusal: {response.refusal}")
+    try:
+        parsed_output = _call_model_and_get_parsed(input_messages)
+    except Exception:
         retry_msg = {
             "role": "user",
             "content": "Fix JSON only: Return corrected JSON with substantial, complete topics (not overly narrow). Each topic should justify the full allocated time."
         }
-        response = _call_model_and_get_parsed(input_messages + [retry_msg])
-        if getattr(response, "output_parsed", None) is None:
-            raise RuntimeError("Model did not return valid parsed output after retry")
-
-    parsed_output = response.output_parsed
+        parsed_output = _call_model_and_get_parsed(input_messages + [retry_msg])
 
     result = {
         "units_to_cover": parsed_output.units_to_cover,
