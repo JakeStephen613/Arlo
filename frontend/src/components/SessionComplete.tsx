@@ -289,12 +289,6 @@ const SessionComplete = ({ onEndSession, sessionData }: SessionCompleteProps) =>
     }
   }, [currentStepIndex]);
 
-  // Start the first step when component mounts
-  useEffect(() => {
-    if (currentStepIndex === 0 && steps[0].status === 'pending') {
-      executeStep(0);
-    }
-  }, []);
 
   const handleViewReviewSheet = () => {
     setShowReviewSheet(true);

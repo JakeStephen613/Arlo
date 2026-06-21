@@ -79,6 +79,7 @@ export default function AppShell({ children }: AppShellProps) {
               onOpenCommand={() => { setSidebarOpen(false); setCommandOpen(true); }}
               userEmail={user?.email}
               onSignOut={signOut}
+              accountMode={userProfile?.account_mode}
             />
           </nav>
         </div>
@@ -92,6 +93,7 @@ export default function AppShell({ children }: AppShellProps) {
           onOpenCommand={() => setCommandOpen(true)}
           userEmail={user?.email}
           onSignOut={signOut}
+          accountMode={userProfile?.account_mode}
         />
       </nav>
 
@@ -115,9 +117,10 @@ interface SidebarContentProps {
   onOpenCommand: () => void;
   userEmail?: string;
   onSignOut: () => void;
+  accountMode?: string;
 }
 
-function SidebarContent({ currentPath, onNavigate, onClose, onOpenCommand, userEmail, onSignOut }: SidebarContentProps) {
+function SidebarContent({ currentPath, onNavigate, onClose, onOpenCommand, userEmail, onSignOut, accountMode }: SidebarContentProps) {
   return (
     <>
       <div className="flex items-center justify-between px-4 h-14 border-b">
@@ -135,7 +138,7 @@ function SidebarContent({ currentPath, onNavigate, onClose, onOpenCommand, userE
       </div>
 
       <div className="flex-1 py-3 px-2 space-y-0.5">
-        {NAV_ITEMS.filter(item => item.path !== '/tutor' || userProfile?.account_mode === 'tutor').map(item => {
+        {NAV_ITEMS.filter(item => item.path !== '/tutor' || accountMode === 'tutor').map(item => {
           const active = item.path === '/' ? currentPath === '/' : currentPath.startsWith(item.path);
           return (
             <button

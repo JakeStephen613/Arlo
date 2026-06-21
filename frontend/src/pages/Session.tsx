@@ -547,6 +547,7 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
   const [followUpContent, setFollowUpContent] = useState('');
   const [followUpStreaming, setFollowUpStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -628,7 +629,7 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
     })();
 
     return () => ac.abort();
-  }, [block.id]);
+  }, [block.id, retryCount]);
 
   useEffect(() => {
     if (!streaming && visibleSections === 0 && sections.length > 0) {
@@ -695,7 +696,7 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
         <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
         <p className="text-foreground font-semibold">{error}</p>
         <button
-          onClick={() => { setError(null); setStreaming(true); setSections([]); setCurrentSection(''); }}
+          onClick={() => { setError(null); setStreaming(true); setSections([]); setCurrentSection(''); setRetryCount(c => c + 1); }}
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           <RotateCcw className="w-4 h-4" /> Retry
@@ -1067,7 +1068,10 @@ function FlashcardStep({ block, onComplete }: { block: StudyBlock; onComplete: (
             ].map(({ label, score, style }) => (
               <button
                 key={score}
-                onClick={() => onComplete(score)}
+                onClick={() => {
+                  apiPost('/flashcards/review', { card_id: block.id, concept_name: block.unit, score }).catch(() => {});
+                  onComplete(score);
+                }}
                 className={`rounded-xl border-2 px-4 py-3 text-sm font-semibold transition-all ${style}`}
               >
                 {label}
@@ -1255,6 +1259,28 @@ function SummaryView({ plan, scores, onHome, onAnother }: {
   onHome: () => void;
   onAnother: () => void;
 }) {
+  const savedRef = useRef(false);
+
+  useEffect(() => {
+    if (savedRef.current) return;
+    savedRef.current = true;
+    (async () => {
+      try {
+        const { supabase } = await import('@/integrations/supabase/client');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user?.id) return;
+        const { saveStudySessionData } = await import('@/services/sessionApi');
+        await saveStudySessionData({
+          topic: plan.topic,
+          duration_minutes: plan.total_duration,
+          user_id: session.user.id,
+        });
+      } catch (e) {
+        console.error('Failed to save session data:', e);
+      }
+    })();
+  }, [plan]);
+
   const avgScore = scores.length > 0
     ? scores.reduce((sum, s) => sum + s.score, 0) / scores.length
     : 0;
