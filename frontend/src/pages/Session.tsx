@@ -651,9 +651,9 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPau
   const progressPct = Math.round((currentIndex / subBlocks.length) * 100);
 
   return (
-    <div className="flex-1 flex gap-6 py-4">
+    <div className="flex-1 flex gap-6 py-4 h-[calc(100vh-6rem)] overflow-hidden">
       {/* Sidebar */}
-      <div className="hidden md:block w-56 shrink-0 space-y-2">
+      <div className="hidden md:block w-56 shrink-0 space-y-2 overflow-y-auto">
         {/* Pomodoro Timer */}
         <div className="rounded-lg border bg-card p-3 mb-4">
           <div className="flex items-center justify-between mb-2">
@@ -724,9 +724,9 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPau
       </div>
 
       {/* Main content */}
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {/* Progress bar */}
-        <div className="mb-4">
+        <div className="mb-4 shrink-0">
           <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
             <span>Block {currentBlockIndex + 1} of {plan.blocks.length}</span>
             <span>{current.block.unit}</span>
@@ -736,8 +736,10 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPau
           </div>
         </div>
 
-        {/* Mode component */}
-        <ModeView subBlock={current} onComplete={onComplete} />
+        {/* Mode component — scrollable independently */}
+        <div className="flex-1 overflow-y-auto pr-2">
+          <ModeView subBlock={current} onComplete={onComplete} />
+        </div>
       </div>
 
       {/* Chatbot */}
@@ -899,15 +901,21 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
     const container = containerRef.current;
     if (!container) return;
 
+    const scrollParent = container.closest('[class*="overflow-y-auto"]') || window;
+
     const handleScroll = () => {
-      const viewportCenter = window.innerHeight / 2;
+      const scrollEl = scrollParent instanceof Window ? document.documentElement : scrollParent as HTMLElement;
+      const viewportTop = scrollParent instanceof Window ? 0 : scrollEl.getBoundingClientRect().top;
+      const viewportHeight = scrollParent instanceof Window ? window.innerHeight : scrollEl.clientHeight;
+      const center = viewportTop + viewportHeight / 2;
+
       let closest = 0;
       let closestDist = Infinity;
       sectionRefs.current.forEach((el, i) => {
         if (!el) return;
         const rect = el.getBoundingClientRect();
         const elCenter = rect.top + rect.height / 2;
-        const dist = Math.abs(elCenter - viewportCenter);
+        const dist = Math.abs(elCenter - center);
         if (dist < closestDist) {
           closestDist = dist;
           closest = i;
@@ -916,9 +924,10 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
       setActiveSection(closest);
     };
 
-    window.addEventListener('scroll', handleScroll, { passive: true });
+    const target = scrollParent instanceof Window ? window : scrollParent;
+    target.addEventListener('scroll', handleScroll, { passive: true });
     handleScroll();
-    return () => window.removeEventListener('scroll', handleScroll);
+    return () => target.removeEventListener('scroll', handleScroll);
   }, [sections.length]);
 
 
@@ -1086,18 +1095,10 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
             </div>
           ))}
 
-          {streaming && currentSection && (
-            <div className="rounded-xl border bg-card p-6">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
-                  <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                </div>
-                <span className="text-xs text-muted-foreground">Writing...</span>
-              </div>
-              <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
-                {formatTeachingText(currentSection)}
-                <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
-              </div>
+          {streaming && sections.length === 0 && (
+            <div className="rounded-xl border bg-card p-6 flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+              <span className="text-sm text-muted-foreground">Generating lesson...</span>
             </div>
           )}
 
