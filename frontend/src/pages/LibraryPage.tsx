@@ -16,6 +16,7 @@ interface ConceptSnapshot {
 interface TutorBriefing {
   weak_concepts: ConceptSnapshot[];
   due_reviews: ConceptSnapshot[];
+  all_concepts: ConceptSnapshot[];
   total_concepts: number;
 }
 
@@ -26,12 +27,16 @@ export default function LibraryPage() {
   useEffect(() => {
     apiGet<TutorBriefing>('/learner/briefing')
       .then(b => {
-        const seen = new Set<string>();
-        const all: ConceptSnapshot[] = [];
-        for (const c of [...b.weak_concepts, ...b.due_reviews]) {
-          if (!seen.has(c.concept_id)) { seen.add(c.concept_id); all.push(c); }
+        if (b.all_concepts?.length) {
+          setConcepts(b.all_concepts.sort((a, b) => a.name.localeCompare(b.name)));
+        } else {
+          const seen = new Set<string>();
+          const all: ConceptSnapshot[] = [];
+          for (const c of [...b.weak_concepts, ...b.due_reviews]) {
+            if (!seen.has(c.concept_id)) { seen.add(c.concept_id); all.push(c); }
+          }
+          setConcepts(all.sort((a, b) => a.name.localeCompare(b.name)));
         }
-        setConcepts(all.sort((a, b) => a.name.localeCompare(b.name)));
       })
       .catch(() => {})
       .finally(() => setLoading(false));

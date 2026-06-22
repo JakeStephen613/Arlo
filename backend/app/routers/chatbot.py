@@ -182,7 +182,7 @@ Provide a clear explanation that helps the student understand this content bette
     return prompt
 
 def call_gpt_sync(prompt: str, schema: dict, fallback_response: dict) -> dict:
-    """Synchronous GPT call using GPT-5-nano structured outputs"""
+    """Synchronous LLM call with structured outputs"""
     try:
         messages = [
             {"role": "system", "content": "You are Arlo, an AI tutor. Be concise, clear, and helpful. Always provide educational content with concrete examples and specific details."},
@@ -195,7 +195,6 @@ def call_gpt_sync(prompt: str, schema: dict, fallback_response: dict) -> dict:
                 "type": "json_schema",
                 "json_schema": schema
             },
-            reasoning_effort="low"
         )
         
         return json.loads(response.choices[0].message.content)

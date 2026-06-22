@@ -4,10 +4,10 @@ const BASE = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:10000'}/a
 
 const getHeaders = async (): Promise<HeadersInit> => {
   const { data: { session }, error } = await supabase.auth.getSession();
-  if (error || !session?.user?.id) throw new Error('Not authenticated');
+  if (error || !session?.access_token) throw new Error('Not authenticated');
   return {
     'Content-Type': 'application/json',
-    'x-user-id': session.user.id,
+    'Authorization': `Bearer ${session.access_token}`,
   };
 };
 

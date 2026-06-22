@@ -55,6 +55,7 @@ class TutorBriefing(BaseModel):
     total_concepts: int = 0
     average_mastery: float = 0.0
     study_streak_days: int = 0
+    all_concepts: list[ConceptSnapshot] = Field(default_factory=list)
 
 
 class AttemptRecord(BaseModel):
@@ -139,6 +140,39 @@ def _insert_attempt(supabase, record: AttemptRecord, now: datetime) -> None:
     ).execute()
 
 
+def _compute_study_streak(supabase, user_id: str) -> int:
+    result = (
+        supabase.table("study_session_data")
+        .select("created_at")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(90)
+        .execute()
+    )
+    if not result.data:
+        return 0
+
+    from datetime import date, timedelta
+    dates = set()
+    for row in result.data:
+        ts = row.get("created_at")
+        if ts:
+            dates.add(datetime.fromisoformat(ts).date())
+
+    today = datetime.now(timezone.utc).date()
+    check = today
+    if check not in dates:
+        check = today - timedelta(days=1)
+        if check not in dates:
+            return 0
+
+    streak = 0
+    while check in dates:
+        streak += 1
+        check -= timedelta(days=1)
+    return streak
+
+
 # ── Public API ──────────────────────────────────────────────────
 
 
@@ -203,6 +237,8 @@ def get_tutor_briefing(user_id: str) -> TutorBriefing:
 
     focus = weak[0].name if weak else (due[0].name if due else None)
 
+    streak = _compute_study_streak(supabase, user_id)
+
     return TutorBriefing(
         user_id=UUID(user_id),
         current_focus=focus,
@@ -211,6 +247,8 @@ def get_tutor_briefing(user_id: str) -> TutorBriefing:
         trajectory=trajectory,
         total_concepts=len(snapshots),
         average_mastery=round(avg_mastery, 3),
+        study_streak_days=streak,
+        all_concepts=snapshots,
     )
 
 
@@ -277,16 +315,27 @@ def record_attempt(record: AttemptRecord) -> MasteryUpdate:
 def ensure_concept(name: str, topic: Optional[str] = None) -> str:
     """Get or create a concept by name+topic, return its id."""
     supabase = _get_supabase()
-    query = supabase.table("concepts").select("id").eq("name", name)
+
+    # Clean topic: strip verbose descriptions (e.g. "Cell Bio: 1) Prokaryotic..." → "Cell Bio")
+    clean_topic = None
     if topic:
-        query = query.eq("topic", topic)
+        clean_topic = topic.split(":")[0].strip() if len(topic) > 80 else topic
+
+    query = supabase.table("concepts").select("id").eq("name", name)
+    if clean_topic:
+        query = query.eq("topic", clean_topic)
     existing = query.limit(1).execute()
 
     if existing.data:
         return existing.data[0]["id"]
 
+    # Fallback: check by name only (handles migration from old long-topic entries)
+    fallback = supabase.table("concepts").select("id").eq("name", name).limit(1).execute()
+    if fallback.data:
+        return fallback.data[0]["id"]
+
     result = supabase.table("concepts").insert(
-        {"id": str(uuid4()), "name": name, "topic": topic}
+        {"id": str(uuid4()), "name": name, "topic": clean_topic}
     ).execute()
     return result.data[0]["id"]
 

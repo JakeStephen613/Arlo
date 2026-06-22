@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import { apiPostAnon } from '@/lib/apiClient';
+import { apiPost } from '@/lib/apiClient';
 
 export interface SessionHistoryItem {
   id: string;
@@ -95,7 +95,7 @@ export const markAssignedSessionComplete = async (
 };
 
 export const generateBedtimeReviewSheet = (userId: string): Promise<unknown> =>
-  apiPostAnon('/review-sheet', { user_id: userId });
+  apiPost('/review-sheet', { user_id: userId });
 
 export const saveSession = async (sessionData: {
   user_id: string;
@@ -133,7 +133,7 @@ export const saveSession = async (sessionData: {
 };
 
 export const resetContext = (userId: string): Promise<unknown> =>
-  apiPostAnon('/context/reset', { user_id: userId });
+  apiPost('/context/reset', { user_id: userId });
 
 export const fetchSessionHistory = async (userId: string): Promise<SessionHistoryItem[]> => {
   const { data, error } = await supabase

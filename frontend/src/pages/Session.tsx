@@ -18,10 +18,28 @@ import {
   Brain,
   Pencil,
   RotateCcw,
+  Pause,
+  Play,
+  Timer,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { apiPost } from '@/lib/apiClient';
+import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+import StudyPlanEditor from '@/components/StudyPlanEditor';
+import ArloChatbot from '@/components/ArloChatbot';
+import { usePomodoroClock } from '@/hooks/usePomodoroClock';
+import { generateBedtimeReviewSheet } from '@/services/sessionApi';
+import type { StudyPlan as SharedStudyPlan } from '@/types';
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('Not authenticated');
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${session.access_token}`,
+  };
+}
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -35,6 +53,8 @@ interface StudyBlock {
   duration: number;
   description: string;
   position: number;
+  custom?: boolean;
+  user_notes?: string | null;
 }
 
 interface StudyPlan {
@@ -63,25 +83,91 @@ interface BlockScore {
 
 // ── Main Component ───────────────────────────────────────────
 
+const SESSION_STORAGE_KEY = 'arlo-session-state';
+
+function saveSessionState(state: {
+  phase: SessionPhase;
+  topic: string;
+  duration: number;
+  plan: StudyPlan | null;
+  subBlocks: ExpandedSubBlock[];
+  currentSubBlockIndex: number;
+  scores: BlockScore[];
+}) {
+  try {
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state));
+  } catch {}
+}
+
+function loadSessionState(): {
+  phase: SessionPhase;
+  topic: string;
+  duration: number;
+  plan: StudyPlan | null;
+  subBlocks: ExpandedSubBlock[];
+  currentSubBlockIndex: number;
+  scores: BlockScore[];
+} | null {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function clearSessionState() {
+  localStorage.removeItem(SESSION_STORAGE_KEY);
+}
+
 export default function Session() {
   const navigate = useNavigate();
   const location = useLocation();
   const prefillTopic = (location.state as any)?.prefillTopic || '';
 
-  const [phase, setPhase] = useState<SessionPhase>('input');
-  const [topic, setTopic] = useState(prefillTopic);
-  const [duration, setDuration] = useState(60);
+  // Try to restore a saved session
+  const savedState = useRef(loadSessionState());
+
+  const [phase, setPhase] = useState<SessionPhase>(savedState.current?.phase || 'input');
+  const [topic, setTopic] = useState(savedState.current?.topic || prefillTopic);
+  const [duration, setDuration] = useState(savedState.current?.duration || 60);
   const [pdfContent, setPdfContent] = useState<string | null>(null);
-  const [plan, setPlan] = useState<StudyPlan | null>(null);
+  const [plan, setPlan] = useState<StudyPlan | null>(savedState.current?.plan || null);
   const [error, setError] = useState<string | null>(null);
 
   // Studying state
-  const [subBlocks, setSubBlocks] = useState<ExpandedSubBlock[]>([]);
-  const [currentSubBlockIndex, setCurrentSubBlockIndex] = useState(0);
-  const [scores, setScores] = useState<BlockScore[]>([]);
+  const [subBlocks, setSubBlocks] = useState<ExpandedSubBlock[]>(savedState.current?.subBlocks || []);
+  const [currentSubBlockIndex, setCurrentSubBlockIndex] = useState(savedState.current?.currentSubBlockIndex || 0);
+  const [scores, setScores] = useState<BlockScore[]>(savedState.current?.scores || []);
   const [preloadedContent, setPreloadedContent] = useState<Record<string, boolean>>({});
 
   const [planLoading, setPlanLoading] = useState(false);
+
+  // Persist session state on changes
+  useEffect(() => {
+    if (phase === 'studying' && plan) {
+      saveSessionState({ phase, topic, duration, plan, subBlocks, currentSubBlockIndex, scores });
+    } else if (phase === 'summary' || phase === 'input') {
+      clearSessionState();
+    }
+  }, [phase, topic, duration, plan, subBlocks, currentSubBlockIndex, scores]);
+
+  const [showResumePrompt, setShowResumePrompt] = useState(
+    () => savedState.current?.phase === 'studying' && !!savedState.current?.plan
+  );
+
+  const discardSaved = () => {
+    clearSessionState();
+    setPhase('input');
+    setTopic(prefillTopic);
+    setDuration(60);
+    setPlan(null);
+    setSubBlocks([]);
+    setCurrentSubBlockIndex(0);
+    setScores([]);
+    setShowResumePrompt(false);
+  };
 
   const generatePlan = async () => {
     if (!topic.trim() && !pdfContent) return;
@@ -141,6 +227,34 @@ export default function Session() {
     );
   }
 
+  if (showResumePrompt) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="max-w-sm w-full rounded-xl border bg-card p-8 text-center shadow-card space-y-4">
+          <RefreshCw className="w-8 h-8 text-primary mx-auto" />
+          <h2 className="font-display text-xl font-bold">Resume session?</h2>
+          <p className="text-sm text-muted-foreground">
+            You have an unfinished session on <span className="font-medium text-foreground">{plan?.topic}</span>.
+          </p>
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={discardSaved}
+              className="flex-1 rounded-lg border py-2.5 text-sm font-medium text-muted-foreground hover:bg-secondary transition-colors"
+            >
+              Start fresh
+            </button>
+            <button
+              onClick={() => setShowResumePrompt(false)}
+              className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              Resume
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-[70vh] flex flex-col">
       {phase === 'input' && (
@@ -155,14 +269,23 @@ export default function Session() {
         />
       )}
       {phase === 'plan-review' && (
-        <PlanReview
-          plan={plan}
-          loading={planLoading}
-          topic={topic}
-          duration={duration}
-          onStart={startStudying}
-          onBack={() => { setPhase('input'); setPlan(null); }}
-        />
+        planLoading || !plan ? (
+          <PlanReview
+            plan={null}
+            loading={planLoading}
+            topic={topic}
+            duration={duration}
+            onStart={startStudying}
+            onBack={() => { setPhase('input'); setPlan(null); }}
+          />
+        ) : (
+          <StudyPlanEditor
+            plan={plan as unknown as SharedStudyPlan}
+            onSavePlan={(updated) => setPlan(updated as unknown as StudyPlan)}
+            onStartSession={(updated) => { setPlan(updated as unknown as StudyPlan); setTimeout(startStudying, 0); }}
+            onBack={() => { setPhase('input'); setPlan(null); }}
+          />
+        )
       )}
       {phase === 'studying' && plan && subBlocks.length > 0 && (
         <StudyingView
@@ -419,6 +542,12 @@ function PlanReview({ plan, loading, topic, duration, onStart, onBack }: {
 
 // ── Studying View (Sidebar + Content) ────────────────────────
 
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete }: {
   plan: StudyPlan;
   subBlocks: ExpandedSubBlock[];
@@ -429,30 +558,33 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete }: {
   const current = subBlocks[currentIndex];
   const currentBlockIndex = current.blockIndex;
   const preloadedRef = useRef<Set<string>>(new Set());
+  const [chatExpanded, setChatExpanded] = useState(false);
+
+  const currentBlock = current.block;
+  const blockDurationSec = currentBlock.duration * 60;
+
+  const {
+    timeRemaining,
+    totalTimeRemaining,
+    timerState,
+    isRunning,
+    progress: timerProgress,
+    startTimer,
+    pauseTimer,
+    skipBreak,
+  } = usePomodoroClock({
+    studyDuration: blockDurationSec,
+    totalSessionDuration: plan.total_duration * 60,
+    currentBlockIndex: currentIndex,
+    autoStart: true,
+    onSessionTimeUp: () => {},
+  });
 
   // Preload next block's teaching content
   useEffect(() => {
     const nextTeach = subBlocks.find((sb, i) => i > currentIndex && sb.mode === 'teach');
     if (!nextTeach || preloadedRef.current.has(nextTeach.block.id)) return;
     preloadedRef.current.add(nextTeach.block.id);
-
-    (async () => {
-      try {
-        const { data: { session } } = await (await import('@/integrations/supabase/client')).supabase.auth.getSession();
-        const base = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:10000'}/api`;
-        // Fire-and-forget: the browser caches the SSE connection warmup
-        // and the backend will have the response ready faster on next request
-        fetch(`${base}/teaching/stream`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': session?.user?.id || '' },
-          body: JSON.stringify({
-            topic: `${nextTeach.block.unit}: ${nextTeach.block.description}`,
-            concept_name: nextTeach.block.unit,
-            difficulty: 'medium',
-          }),
-        }).catch(() => {});
-      } catch {}
-    })();
   }, [currentIndex, subBlocks]);
 
   // Which original blocks are complete
@@ -472,6 +604,38 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete }: {
     <div className="flex-1 flex gap-6 py-4">
       {/* Sidebar */}
       <div className="hidden md:block w-56 shrink-0 space-y-2">
+        {/* Pomodoro Timer */}
+        <div className="rounded-lg border bg-card p-3 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <Timer className="w-3.5 h-3.5 text-primary" />
+              <span className="text-xs font-medium text-muted-foreground uppercase">
+                {timerState === 'break' ? 'Break' : 'Timer'}
+              </span>
+            </div>
+            <button
+              onClick={isRunning ? pauseTimer : startTimer}
+              className="p-1 rounded hover:bg-secondary transition-colors"
+            >
+              {isRunning ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+            </button>
+          </div>
+          <p className="text-2xl font-bold text-foreground text-center tabular-nums">
+            {formatTime(timeRemaining)}
+          </p>
+          <div className="h-1 bg-secondary rounded-full overflow-hidden mt-2">
+            <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${timerProgress}%` }} />
+          </div>
+          <p className="text-[10px] text-muted-foreground text-center mt-1.5">
+            Session: {formatTime(totalTimeRemaining)}
+          </p>
+          {timerState === 'break' && (
+            <button onClick={skipBreak} className="w-full mt-2 text-xs text-primary hover:underline">
+              Skip break
+            </button>
+          )}
+        </div>
+
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Study Plan</p>
         {plan.blocks.map((block, i) => {
           const isDone = completedBlocks.has(i);
@@ -516,6 +680,35 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete }: {
 
         {/* Mode component */}
         <ModeView subBlock={current} onComplete={onComplete} />
+      </div>
+
+      {/* Chatbot */}
+      <div className={cn(
+        'hidden md:block shrink-0 transition-all',
+        chatExpanded ? 'w-80' : 'w-10'
+      )}>
+        {chatExpanded ? (
+          <ArloChatbot
+            isExpanded={chatExpanded}
+            onToggleExpand={() => setChatExpanded(false)}
+            currentBlock={{
+              id: currentBlock.id,
+              unit: currentBlock.unit,
+              technique: current.mode,
+              description: currentBlock.description,
+              duration: currentBlock.duration,
+            }}
+            sessionId={plan.session_id}
+          />
+        ) : (
+          <button
+            onClick={() => setChatExpanded(true)}
+            className="w-10 h-10 rounded-full border bg-card flex items-center justify-center hover:bg-secondary transition-colors"
+            title="Ask Arlo"
+          >
+            <MessageSquare className="w-4 h-4 text-primary" />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -564,11 +757,11 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
 
     (async () => {
       try {
-        const { data: { session } } = await (await import('@/integrations/supabase/client')).supabase.auth.getSession();
+        const headers = await getAuthHeaders();
         const base = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:10000'}/api`;
         const res = await fetch(`${base}/teaching/stream`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': session?.user?.id || '' },
+          headers,
           body: JSON.stringify({
             topic: `${block.unit}: ${block.description}`,
             concept_name: block.unit,
@@ -670,11 +863,11 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
     setFollowUpStreaming(true);
     setFollowUpContent('');
     try {
-      const { data: { session } } = await (await import('@/integrations/supabase/client')).supabase.auth.getSession();
+      const headers = await getAuthHeaders();
       const base = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:10000'}/api`;
       const res = await fetch(`${base}/teaching/followup`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': session?.user?.id || '' },
+        headers,
         body: JSON.stringify({ original_topic: block.unit, follow_up: followUp }),
       });
       const reader = res.body?.getReader();
@@ -864,33 +1057,29 @@ function formatTeachingText(text: string): string {
 // ── Quiz Step ────────────────────────────────────────────────
 
 function QuizStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
-  const [question, setQuestion] = useState('');
-  const [options, setOptions] = useState<string[]>([]);
-  const [correctAnswer, setCorrectAnswer] = useState('');
-  const [explanation, setExplanation] = useState('');
+  interface QuizQ { question: string; options: string[]; correct_answer: string; explanation: string }
+  const [questions, setQuestions] = useState<QuizQ[]>([]);
+  const [currentQ, setCurrentQ] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [scores, setScores] = useState<number[]>([]);
 
   const loadQuiz = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await apiPost<any>('/quiz/generate', {
-        content: `Create a multiple choice question to test understanding of ${block.unit}. Focus on: ${block.description}`,
+        content: `Test understanding of ${block.unit}. Focus on: ${block.description}`,
         difficulty: 'medium',
         concept_name: block.unit,
-        max_questions: 1,
-      }, 30000);
-      const q = res.questions?.[0];
-      if (q) {
-        setQuestion(q.question);
-        setOptions(q.options);
-        setCorrectAnswer(q.correct_answer);
-        setExplanation(q.explanation);
+        max_questions: 5,
+      }, 45000);
+      if (res.questions?.length) {
+        setQuestions(res.questions);
       } else {
-        setError('No question was generated');
+        setError('No questions were generated');
       }
     } catch {
       setError('Quiz generation failed');
@@ -902,8 +1091,19 @@ function QuizStep({ block, onComplete }: { block: StudyBlock; onComplete: (score
 
   const handleReveal = () => {
     setRevealed(true);
-    const isCorrect = selected === correctAnswer;
-    setTimeout(() => onComplete(isCorrect ? 1.0 : 0.0), 2000);
+    const isCorrect = selected === questions[currentQ].correct_answer;
+    setScores(prev => [...prev, isCorrect ? 1.0 : 0.0]);
+  };
+
+  const handleNext = () => {
+    if (currentQ + 1 < questions.length) {
+      setCurrentQ(prev => prev + 1);
+      setSelected(null);
+      setRevealed(false);
+    } else {
+      const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+      onComplete(avg);
+    }
   };
 
   if (loading) return <LoadingMode label="Generating quiz..." />;
@@ -929,22 +1129,24 @@ function QuizStep({ block, onComplete }: { block: StudyBlock; onComplete: (score
     );
   }
 
+  const q = questions[currentQ];
+
   return (
     <div className="max-w-lg mx-auto w-full space-y-5 animate-fade-in">
       <div className="flex items-center gap-2 mb-2">
         <Badge className="bg-forest-600 text-white border-0">Quiz</Badge>
-        <span className="text-sm text-muted-foreground">{block.unit}</span>
+        <span className="text-sm text-muted-foreground">{block.unit} · {currentQ + 1}/{questions.length}</span>
       </div>
 
       <div className="rounded-xl border-2 border-forest-200 dark:border-forest-700 bg-card p-6">
-        <p className="text-foreground font-medium leading-relaxed text-lg">{question}</p>
+        <p className="text-foreground font-medium leading-relaxed text-lg">{q.question}</p>
       </div>
 
       <div className="space-y-2.5">
-        {options.map((opt, i) => {
+        {q.options.map((opt, i) => {
           const letter = String.fromCharCode(65 + i);
-          const isCorrect = revealed && opt === correctAnswer;
-          const isWrong = revealed && opt === selected && opt !== correctAnswer;
+          const isCorrect = revealed && opt === q.correct_answer;
+          const isWrong = revealed && opt === selected && opt !== q.correct_answer;
           return (
             <button
               key={i}
@@ -973,10 +1175,10 @@ function QuizStep({ block, onComplete }: { block: StudyBlock; onComplete: (score
         })}
       </div>
 
-      {revealed && explanation && (
+      {revealed && q.explanation && (
         <div className="rounded-xl border bg-forest-50 dark:bg-forest-900/20 p-5 text-sm animate-fade-in">
           <p className="font-semibold text-foreground mb-1">Why?</p>
-          <p className="text-muted-foreground leading-relaxed">{explanation}</p>
+          <p className="text-muted-foreground leading-relaxed">{q.explanation}</p>
         </div>
       )}
 
@@ -988,6 +1190,15 @@ function QuizStep({ block, onComplete }: { block: StudyBlock; onComplete: (score
           Check answer
         </button>
       )}
+
+      {revealed && (
+        <button
+          onClick={handleNext}
+          className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors animate-fade-in"
+        >
+          {currentQ + 1 < questions.length ? 'Next question' : 'Finish quiz'}
+        </button>
+      )}
     </div>
   );
 }
@@ -995,26 +1206,26 @@ function QuizStep({ block, onComplete }: { block: StudyBlock; onComplete: (score
 // ── Flashcard Step ───────────────────────────────────────────
 
 function FlashcardStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
-  const [front, setFront] = useState('');
-  const [back, setBack] = useState('');
+  const [cards, setCards] = useState<{ front: string; back: string }[]>([]);
+  const [currentCard, setCurrentCard] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [scores, setScores] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadCard = useCallback(async () => {
+  const loadCards = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await apiPost<any>('/flashcards', {
-        content: `Create a flashcard about: ${block.unit}. Focus on: ${block.description}`,
+        content: `Create flashcards about: ${block.unit}. Focus on: ${block.description}`,
         concept_name: block.unit,
-      }, 20000);
-      const card = res.flashcards?.[0];
-      if (card) {
-        setFront(card.front);
-        setBack(card.back);
+        num_cards: 5,
+      }, 30000);
+      if (res.flashcards?.length) {
+        setCards(res.flashcards);
       } else {
-        setError('No flashcard was generated');
+        setError('No flashcards were generated');
       }
     } catch {
       setError('Flashcard generation failed');
@@ -1022,9 +1233,22 @@ function FlashcardStep({ block, onComplete }: { block: StudyBlock; onComplete: (
     setLoading(false);
   }, [block.unit, block.description]);
 
-  useEffect(() => { loadCard(); }, [loadCard]);
+  useEffect(() => { loadCards(); }, [loadCards]);
 
-  if (loading) return <LoadingMode label="Creating flashcard..." />;
+  const handleScore = (score: number) => {
+    apiPost('/flashcards/review', { card_id: block.id, concept_name: block.unit, score }).catch(() => {});
+    const newScores = [...scores, score];
+    setScores(newScores);
+    if (currentCard + 1 < cards.length) {
+      setCurrentCard(prev => prev + 1);
+      setFlipped(false);
+    } else {
+      const avg = newScores.reduce((a, b) => a + b, 0) / newScores.length;
+      onComplete(avg);
+    }
+  };
+
+  if (loading) return <LoadingMode label="Creating flashcards..." />;
 
   if (error) {
     return (
@@ -1032,7 +1256,7 @@ function FlashcardStep({ block, onComplete }: { block: StudyBlock; onComplete: (
         <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
         <p className="text-foreground font-semibold">{error}</p>
         <button
-          onClick={loadCard}
+          onClick={loadCards}
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           <RotateCcw className="w-4 h-4" /> Retry
@@ -1047,11 +1271,13 @@ function FlashcardStep({ block, onComplete }: { block: StudyBlock; onComplete: (
     );
   }
 
+  const card = cards[currentCard];
+
   return (
     <div className="max-w-lg mx-auto w-full space-y-5 animate-fade-in">
       <div className="flex items-center gap-2 mb-2">
         <Badge className="bg-forest-600 text-white border-0">Flashcard</Badge>
-        <span className="text-sm text-muted-foreground">{block.unit}</span>
+        <span className="text-sm text-muted-foreground">{block.unit} · {currentCard + 1}/{cards.length}</span>
       </div>
 
       <button
@@ -1062,7 +1288,7 @@ function FlashcardStep({ block, onComplete }: { block: StudyBlock; onComplete: (
           {flipped ? 'Answer' : 'Question'}
         </p>
         <p className="text-xl font-medium text-foreground leading-relaxed max-w-md">
-          {flipped ? back : front}
+          {flipped ? card.back : card.front}
         </p>
         {!flipped && <p className="text-xs text-muted-foreground mt-6">Tap to reveal</p>}
       </button>
@@ -1078,10 +1304,7 @@ function FlashcardStep({ block, onComplete }: { block: StudyBlock; onComplete: (
             ].map(({ label, score, style }) => (
               <button
                 key={score}
-                onClick={() => {
-                  apiPost('/flashcards/review', { card_id: block.id, concept_name: block.unit, score }).catch(() => {});
-                  onComplete(score);
-                }}
+                onClick={() => handleScore(score)}
                 className={`rounded-xl border-2 px-4 py-3 text-sm font-semibold transition-all ${style}`}
               >
                 {label}
@@ -1097,9 +1320,31 @@ function FlashcardStep({ block, onComplete }: { block: StudyBlock; onComplete: (
 // ── Feynman Step ─────────────────────────────────────────────
 
 function FeynmanStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
+  const [questions, setQuestions] = useState<string[]>([]);
+  const [currentQ, setCurrentQ] = useState(0);
   const [explanation, setExplanation] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ score: number; wellDone: string[]; gaps: string[] } | null>(null);
+  const [allScores, setAllScores] = useState<number[]>([]);
+
+  const loadExercises = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiPost<{ questions: string[] }>('/feynman/exercises', {
+        teaching_content: `${block.unit}: ${block.description}`,
+        concept_name: block.unit,
+      }, 20000);
+      setQuestions(res.questions?.length ? res.questions : [`Explain ${block.unit} in your own words.`]);
+    } catch {
+      setQuestions([`Explain ${block.unit} in your own words.`]);
+    }
+    setLoading(false);
+  }, [block.unit, block.description]);
+
+  useEffect(() => { loadExercises(); }, [loadExercises]);
 
   const handleSubmit = async () => {
     if (!explanation.trim()) return;
@@ -1107,58 +1352,115 @@ function FeynmanStep({ block, onComplete }: { block: StudyBlock; onComplete: (sc
     setError(null);
     try {
       const res = await apiPost<any>('/feynman/assess', {
-        question: `Explain ${block.unit} in your own words`,
+        question: questions[currentQ],
         user_explanation: explanation,
         concept_name: block.unit,
       }, 20000);
-      onComplete(res.score ?? 0.5);
+      const score = res.score ?? 0.5;
+      setAllScores(prev => [...prev, score]);
+      setFeedback({
+        score: res.mastery_score ?? Math.round(score * 100),
+        wellDone: res.what_went_well || [],
+        gaps: res.gaps_in_understanding || [],
+      });
     } catch {
       setError('Failed to assess explanation');
       setSubmitting(false);
     }
   };
 
+  const handleNext = () => {
+    if (currentQ + 1 < questions.length) {
+      setCurrentQ(prev => prev + 1);
+      setExplanation('');
+      setFeedback(null);
+      setSubmitting(false);
+    } else {
+      const avg = allScores.length ? allScores.reduce((a, b) => a + b, 0) / allScores.length : 0.5;
+      onComplete(avg);
+    }
+  };
+
+  if (loading) return <LoadingMode label="Generating questions..." />;
+
   return (
     <div className="max-w-lg mx-auto w-full space-y-5 animate-fade-in">
       <div className="flex items-center gap-2 mb-2">
         <Badge className="bg-forest-600 text-white border-0">Explain it</Badge>
-        <span className="text-sm text-muted-foreground">{block.unit}</span>
+        <span className="text-sm text-muted-foreground">{block.unit} · {currentQ + 1}/{questions.length}</span>
       </div>
 
       <div className="rounded-xl border-2 border-forest-200 dark:border-forest-700 bg-card p-6">
-        <p className="text-foreground font-medium text-lg">Explain <span className="text-primary font-bold">{block.unit}</span> in your own words.</p>
-        <p className="text-sm text-muted-foreground mt-2">Imagine you're teaching someone who has never heard of this before.</p>
+        <p className="text-foreground font-medium text-lg leading-relaxed">{questions[currentQ]}</p>
+        <p className="text-sm text-muted-foreground mt-2">Explain as if teaching someone who has never heard of this.</p>
       </div>
 
-      <textarea
-        value={explanation}
-        onChange={e => setExplanation(e.target.value)}
-        rows={8}
-        placeholder="Start explaining..."
-        className="w-full rounded-xl border-2 bg-card px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors resize-none"
-        autoFocus
-      />
+      {!feedback ? (
+        <>
+          <textarea
+            value={explanation}
+            onChange={e => setExplanation(e.target.value)}
+            rows={8}
+            placeholder="Start explaining..."
+            className="w-full rounded-xl border-2 bg-card px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors resize-none"
+            autoFocus
+          />
 
-      {error && (
-        <div className="flex items-center gap-2 text-sm text-destructive">
-          <AlertCircle className="w-4 h-4" />
-          <span>{error}</span>
-          <button onClick={handleSubmit} className="text-primary hover:underline ml-2">Retry</button>
-          <button onClick={() => onComplete(0.5)} className="text-muted-foreground hover:underline ml-2">Skip</button>
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <AlertCircle className="w-4 h-4" />
+              <span>{error}</span>
+              <button onClick={handleSubmit} className="text-primary hover:underline ml-2">Retry</button>
+              <button onClick={() => onComplete(0.5)} className="text-muted-foreground hover:underline ml-2">Skip</button>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">{explanation.split(/\s+/).filter(Boolean).length} words</span>
+            <button
+              onClick={handleSubmit}
+              disabled={explanation.split(/\s+/).filter(Boolean).length < 10 || submitting}
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
+            >
+              {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Submit
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="space-y-4 animate-fade-in">
+          <div className="rounded-xl border bg-card p-5">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-semibold text-foreground">Score</span>
+              <span className={cn('text-2xl font-bold', feedback.score >= 70 ? 'text-green-600' : feedback.score >= 40 ? 'text-yellow-600' : 'text-red-500')}>
+                {feedback.score}%
+              </span>
+            </div>
+            {feedback.wellDone.length > 0 && (
+              <div className="mb-3">
+                <p className="text-xs font-medium text-green-600 mb-1">What you got right</p>
+                {feedback.wellDone.map((item, i) => (
+                  <p key={i} className="text-sm text-muted-foreground leading-relaxed">• {item}</p>
+                ))}
+              </div>
+            )}
+            {feedback.gaps.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-red-500 mb-1">Gaps to review</p>
+                {feedback.gaps.map((item, i) => (
+                  <p key={i} className="text-sm text-muted-foreground leading-relaxed">• {item}</p>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={handleNext}
+            className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            {currentQ + 1 < questions.length ? 'Next question' : 'Continue'}
+          </button>
         </div>
       )}
-
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">{explanation.split(/\s+/).filter(Boolean).length} words</span>
-        <button
-          onClick={handleSubmit}
-          disabled={explanation.split(/\s+/).filter(Boolean).length < 10 || submitting}
-          className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
-        >
-          {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          Submit
-        </button>
-      </div>
     </div>
   );
 }
@@ -1166,9 +1468,32 @@ function FeynmanStep({ block, onComplete }: { block: StudyBlock; onComplete: (sc
 // ── Blurting Step ────────────────────────────────────────────
 
 function BlurtingStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
+  const [exercises, setExercises] = useState<{ prompt: string; focus: string }[]>([]);
+  const [currentEx, setCurrentEx] = useState(0);
   const [response, setResponse] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ mentioned: string[]; missed: string[]; score: string; text: string } | null>(null);
+  const [allScores, setAllScores] = useState<number[]>([]);
+
+  const loadExercises = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiPost<any>('/blurting/exercises', {
+        teaching_block: `${block.unit}: ${block.description}`,
+        concept_name: block.unit,
+      }, 20000);
+      const exs = [res.exercise_1, res.exercise_2, res.exercise_3].filter(Boolean);
+      setExercises(exs.length ? exs : [{ prompt: `Write everything you remember about ${block.unit}.`, focus: 'General recall' }]);
+    } catch {
+      setExercises([{ prompt: `Write everything you remember about ${block.unit}.`, focus: 'General recall' }]);
+    }
+    setLoading(false);
+  }, [block.unit, block.description]);
+
+  useEffect(() => { loadExercises(); }, [loadExercises]);
 
   const handleSubmit = async () => {
     if (!response.trim()) return;
@@ -1176,58 +1501,123 @@ function BlurtingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
     setError(null);
     try {
       const res = await apiPost<any>('/blurting/feedback', {
-        exercise_question: `Write everything you know about ${block.unit}`,
+        exercise_question: exercises[currentEx].prompt,
         blurted_response: response,
         concept_name: block.unit,
       }, 20000);
-      onComplete(res.score ?? 0.5);
+      const score = res.score ?? 0.5;
+      setAllScores(prev => [...prev, score]);
+      setFeedback({
+        mentioned: res.mentioned || [],
+        missed: res.missed || [],
+        score: res.score_fraction || `${Math.round(score * 100)}%`,
+        text: res.feedback || '',
+      });
     } catch {
       setError('Failed to assess response');
       setSubmitting(false);
     }
   };
 
+  const handleNext = () => {
+    if (currentEx + 1 < exercises.length) {
+      setCurrentEx(prev => prev + 1);
+      setResponse('');
+      setFeedback(null);
+      setSubmitting(false);
+    } else {
+      const avg = allScores.length ? allScores.reduce((a, b) => a + b, 0) / allScores.length : 0.5;
+      onComplete(avg);
+    }
+  };
+
+  if (loading) return <LoadingMode label="Generating recall exercises..." />;
+
+  const ex = exercises[currentEx];
+
   return (
     <div className="max-w-lg mx-auto w-full space-y-5 animate-fade-in">
       <div className="flex items-center gap-2 mb-2">
         <Badge className="bg-forest-600 text-white border-0">Recall</Badge>
-        <span className="text-sm text-muted-foreground">{block.unit}</span>
+        <span className="text-sm text-muted-foreground">{block.unit} · {currentEx + 1}/{exercises.length}</span>
       </div>
 
       <div className="rounded-xl border-2 border-forest-200 dark:border-forest-700 bg-card p-6">
-        <p className="text-foreground font-medium text-lg">Write everything you remember about <span className="text-primary font-bold">{block.unit}</span>.</p>
+        <p className="text-foreground font-medium text-lg leading-relaxed">{ex.prompt}</p>
         <p className="text-sm text-muted-foreground mt-2">No peeking — just write what comes to mind.</p>
       </div>
 
-      <textarea
-        value={response}
-        onChange={e => setResponse(e.target.value)}
-        rows={8}
-        placeholder="Start writing..."
-        className="w-full rounded-xl border-2 bg-card px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors resize-none"
-        autoFocus
-      />
+      {!feedback ? (
+        <>
+          <textarea
+            value={response}
+            onChange={e => setResponse(e.target.value)}
+            rows={8}
+            placeholder="Start writing..."
+            className="w-full rounded-xl border-2 bg-card px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors resize-none"
+            autoFocus
+          />
 
-      {error && (
-        <div className="flex items-center gap-2 text-sm text-destructive">
-          <AlertCircle className="w-4 h-4" />
-          <span>{error}</span>
-          <button onClick={handleSubmit} className="text-primary hover:underline ml-2">Retry</button>
-          <button onClick={() => onComplete(0.5)} className="text-muted-foreground hover:underline ml-2">Skip</button>
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <AlertCircle className="w-4 h-4" />
+              <span>{error}</span>
+              <button onClick={handleSubmit} className="text-primary hover:underline ml-2">Retry</button>
+              <button onClick={() => onComplete(0.5)} className="text-muted-foreground hover:underline ml-2">Skip</button>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">{response.split(/\s+/).filter(Boolean).length} words</span>
+            <button
+              onClick={handleSubmit}
+              disabled={response.split(/\s+/).filter(Boolean).length < 5 || submitting}
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
+            >
+              {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Submit
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="space-y-4 animate-fade-in">
+          <div className="rounded-xl border bg-card p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-foreground">Recall score</span>
+              <span className="text-lg font-bold text-primary">{feedback.score}</span>
+            </div>
+            {feedback.mentioned.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-green-600 mb-1">Remembered</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {feedback.mentioned.map((item, i) => (
+                    <span key={i} className="rounded-md bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs text-green-700 dark:text-green-300">{item}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {feedback.missed.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-red-500 mb-1">Missed</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {feedback.missed.map((item, i) => (
+                    <span key={i} className="rounded-md bg-red-100 dark:bg-red-900/30 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">{item}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {feedback.text && (
+              <p className="text-sm text-muted-foreground leading-relaxed border-t pt-3">{feedback.text}</p>
+            )}
+          </div>
+          <button
+            onClick={handleNext}
+            className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            {currentEx + 1 < exercises.length ? 'Next exercise' : 'Continue'}
+          </button>
         </div>
       )}
-
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">{response.split(/\s+/).filter(Boolean).length} words</span>
-        <button
-          onClick={handleSubmit}
-          disabled={response.split(/\s+/).filter(Boolean).length < 5 || submitting}
-          className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
-        >
-          {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          Submit
-        </button>
-      </div>
     </div>
   );
 }
@@ -1263,6 +1653,14 @@ function LoadingMode({ label }: { label: string }) {
 
 // ── Summary View ────────────────────────────────────────────
 
+interface ReviewSheet {
+  summary: string;
+  memorization_facts: string[];
+  weak_areas: string[];
+  major_topics: string[];
+  study_tips: string[];
+}
+
 function SummaryView({ plan, scores, onHome, onAnother }: {
   plan: StudyPlan;
   scores: BlockScore[];
@@ -1270,6 +1668,8 @@ function SummaryView({ plan, scores, onHome, onAnother }: {
   onAnother: () => void;
 }) {
   const savedRef = useRef(false);
+  const [reviewSheet, setReviewSheet] = useState<ReviewSheet | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
 
   useEffect(() => {
     if (savedRef.current) return;
@@ -1285,6 +1685,14 @@ function SummaryView({ plan, scores, onHome, onAnother }: {
           duration_minutes: plan.total_duration,
           user_id: session.user.id,
         });
+
+        // Generate review sheet
+        setReviewLoading(true);
+        try {
+          const sheet = await generateBedtimeReviewSheet(session.user.id) as ReviewSheet;
+          setReviewSheet(sheet);
+        } catch {}
+        setReviewLoading(false);
       } catch (e) {
         console.error('Failed to save session data:', e);
       }
@@ -1351,6 +1759,43 @@ function SummaryView({ plan, scores, onHome, onAnother }: {
             );
           })}
         </div>
+
+        {/* Review Sheet */}
+        {reviewLoading && (
+          <div className="rounded-xl border bg-card p-5 text-center">
+            <div className="w-6 h-6 rounded-full border-2 border-primary/20 border-t-primary animate-spin mx-auto" />
+            <p className="text-xs text-muted-foreground mt-2">Generating review sheet...</p>
+          </div>
+        )}
+        {reviewSheet && (
+          <div className="rounded-xl border bg-card p-5 space-y-4">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-primary" />
+              Review Sheet
+            </h3>
+            <p className="text-sm text-muted-foreground leading-relaxed">{reviewSheet.summary}</p>
+            {reviewSheet.memorization_facts?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-foreground mb-1.5">Key facts to remember</p>
+                <ul className="space-y-1">
+                  {reviewSheet.memorization_facts.map((f, i) => (
+                    <li key={i} className="text-xs text-muted-foreground pl-3 relative before:content-['•'] before:absolute before:left-0 before:text-primary">{f}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {reviewSheet.study_tips?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-foreground mb-1.5">Study tips</p>
+                <ul className="space-y-1">
+                  {reviewSheet.study_tips.map((t, i) => (
+                    <li key={i} className="text-xs text-muted-foreground pl-3 relative before:content-['•'] before:absolute before:left-0 before:text-primary">{t}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex gap-3 pt-2">
           <button

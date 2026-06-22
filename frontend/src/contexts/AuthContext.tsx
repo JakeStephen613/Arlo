@@ -10,6 +10,8 @@ interface UserProfile {
   avatar_url: string | null;
   tutor_code: string | null;
   account_mode: 'arlo_tutoring' | 'hybrid' | 'tutor';
+  grade_level: string | null;
+  learning_goals: string | null;
   credits: number | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
@@ -88,10 +90,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           avatar_url: data.avatar_url,
           tutor_code: data.tutor_code,
           account_mode: data.account_mode,
-          credits: null, // Default since not in database
-          stripe_customer_id: null, // Default since not in database
-          stripe_subscription_id: null, // Default since not in database
-          subscription_status: null // Default since not in database
+          grade_level: data.grade_level ?? null,
+          learning_goals: data.learning_goals ?? null,
+          credits: null,
+          stripe_customer_id: null,
+          stripe_subscription_id: null,
+          subscription_status: null
         });
       }
     } catch (error) {
@@ -160,7 +164,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         throw error;
       }
 
-      // Map updated database profile to UserProfile interface
       setUserProfile({
         id: data.id,
         email: data.email,
@@ -168,10 +171,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         avatar_url: data.avatar_url,
         tutor_code: data.tutor_code,
         account_mode: data.account_mode,
-        credits: null, // Default since not in database
-        stripe_customer_id: null, // Default since not in database
-        stripe_subscription_id: null, // Default since not in database
-        subscription_status: null // Default since not in database
+        grade_level: data.grade_level ?? null,
+        learning_goals: data.learning_goals ?? null,
+        credits: null,
+        stripe_customer_id: null,
+        stripe_subscription_id: null,
+        subscription_status: null
       });
       return data;
     } catch (error) {

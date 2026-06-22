@@ -83,7 +83,15 @@ def call_messages(
         response_format=response_format,
     )
     resp = _client.messages.create(**kwargs)
-    return next((b.text for b in resp.content if b.type == "text"), "")
+    text = next((b.text for b in resp.content if b.type == "text"), "")
+    return _strip_code_fences(text)
+
+
+def _strip_code_fences(text: str) -> str:
+    import re
+    stripped = re.sub(r"^```(?:json)?\s*\n?", "", text.strip())
+    stripped = re.sub(r"\n?```\s*$", "", stripped)
+    return stripped.strip()
 
 
 # ── Streaming (async generator) ───────────────────────────────

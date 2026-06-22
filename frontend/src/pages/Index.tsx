@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { apiGet } from '@/lib/apiClient';
+import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface ConceptSnapshot {
   concept_id: string;
@@ -169,23 +171,111 @@ export default function Index() {
 }
 
 
+const GRADE_LEVELS = ['Middle School', 'High School', 'Undergraduate', 'Graduate', 'Self-study'];
+
 function EmptyState({ onStart }: { onStart: () => void }) {
-  return (
-    <div className="rounded-lg border bg-card p-10 text-center">
-      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-        <BookOpen className="w-6 h-6 text-primary" />
+  const { userProfile, updateProfile } = useAuth();
+  const [step, setStep] = useState<'welcome' | 'grade' | 'goals' | 'done'>(() => {
+    return userProfile?.grade_level ? 'done' : 'welcome';
+  });
+  const [grade, setGrade] = useState('');
+  const [goals, setGoals] = useState('');
+
+  const finishOnboarding = async () => {
+    try {
+      await updateProfile({ grade_level: grade, learning_goals: goals || null } as any);
+    } catch {}
+    setStep('done');
+  };
+
+  if (step === 'done') {
+    return (
+      <div className="rounded-lg border bg-card p-10 text-center">
+        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+          <BookOpen className="w-6 h-6 text-primary" />
+        </div>
+        <h2 className="font-display text-xl font-semibold mb-2">Start your first session</h2>
+        <p className="text-muted-foreground text-sm max-w-sm mx-auto leading-relaxed">
+          Arlo tracks how you're doing across every concept and adapts to help you learn efficiently. Complete a study session to see your mastery data here.
+        </p>
+        <button
+          onClick={onStart}
+          className="mt-5 inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          Learn something new
+          <ArrowRight className="w-4 h-4" />
+        </button>
       </div>
-      <h2 className="font-display text-xl font-semibold mb-2">Start your first session</h2>
-      <p className="text-muted-foreground text-sm max-w-sm mx-auto leading-relaxed">
-        Arlo tracks how you're doing across every concept and adapts to help you learn efficiently. Complete a study session to see your mastery data here.
-      </p>
-      <button
-        onClick={onStart}
-        className="mt-5 inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-      >
-        Learn something new
-        <ArrowRight className="w-4 h-4" />
-      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border bg-card p-8 max-w-md mx-auto animate-fade-in">
+      {step === 'welcome' && (
+        <div className="text-center space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+            <BookOpen className="w-7 h-7 text-primary" />
+          </div>
+          <h2 className="font-display text-xl font-semibold">Welcome to Arlo</h2>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            Let's personalize your experience. A couple of quick questions so Arlo can adapt to your level.
+          </p>
+          <button
+            onClick={() => setStep('grade')}
+            className="w-full rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            Get started
+          </button>
+        </div>
+      )}
+
+      {step === 'grade' && (
+        <div className="space-y-4">
+          <h2 className="font-display text-lg font-semibold text-center">What's your level?</h2>
+          <div className="grid gap-2">
+            {GRADE_LEVELS.map(g => (
+              <button
+                key={g}
+                onClick={() => { setGrade(g); setStep('goals'); }}
+                className={cn(
+                  'rounded-lg border px-4 py-3 text-sm font-medium text-left transition-colors hover:border-primary/50',
+                  grade === g ? 'border-primary bg-primary/5 text-foreground' : 'text-muted-foreground'
+                )}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {step === 'goals' && (
+        <div className="space-y-4">
+          <h2 className="font-display text-lg font-semibold text-center">What are you studying?</h2>
+          <p className="text-xs text-muted-foreground text-center">Tell Arlo what subjects or goals you're working on.</p>
+          <textarea
+            value={goals}
+            onChange={e => setGoals(e.target.value)}
+            placeholder="e.g. Preparing for AP Biology exam, learning calculus, reviewing organic chemistry..."
+            className="w-full rounded-lg border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-none h-24"
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => setStep('grade')}
+              className="flex-1 rounded-lg border py-2.5 text-sm font-medium text-muted-foreground hover:bg-secondary transition-colors"
+            >
+              Back
+            </button>
+            <button
+              onClick={finishOnboarding}
+              className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              {goals.trim() ? 'Continue' : 'Skip'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -260,7 +260,7 @@ class ContextUpdate(BaseModel):
 class ContextResetRequest(BaseModel):
     user_id: str
 
-# GPT-5-nano JSON Schema for synthesis
+# JSON Schema for synthesis
 SYNTHESIS_SCHEMA = {
     "name": "context_synthesis",
     "schema": {

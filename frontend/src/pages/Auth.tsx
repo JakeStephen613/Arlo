@@ -178,26 +178,26 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-background flex items-center justify-center p-6">
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <BookOpen className="w-8 h-8 text-white" />
+          <div className="w-16 h-16 bg-gradient-to-br from-primary to-primary/70 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <BookOpen className="w-8 h-8 text-primary-foreground" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">ARLO</h1>
-          <p className="text-indigo-600 font-medium">AI Personal Tutor</p>
+          <h1 className="text-3xl font-bold text-foreground">ARLO</h1>
+          <p className="text-primary font-medium">AI Personal Tutor</p>
         </div>
 
         {/* Auth Card */}
-        <Card className="p-8 bg-white/80 backdrop-blur-sm border border-indigo-100 shadow-xl">
+        <Card className="p-8 bg-card/80 backdrop-blur-sm border shadow-xl">
           <div className="mb-6 text-center">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            <h2 className="text-2xl font-bold text-foreground mb-2">
               {isSignUp ? 'Join ARLO Today' : 'Welcome Back to ARLO'}
             </h2>
-            <p className="text-gray-600">
-              {isSignUp 
-                ? 'Create your account and start your personalized learning journey' 
+            <p className="text-muted-foreground">
+              {isSignUp
+                ? 'Create your account and start your personalized learning journey'
                 : 'Continue your learning journey with AI-powered study sessions'
               }
             </p>
@@ -206,7 +206,7 @@ const Auth = () => {
           <form onSubmit={handleSubmit} className="space-y-4">
             {isSignUp && (
               <div className="space-y-3">
-                <Label className="text-sm font-medium text-gray-700">
+                <Label className="text-sm font-medium text-foreground">
                   I am a...
                 </Label>
                 <RadioGroup 
@@ -214,14 +214,14 @@ const Auth = () => {
                   onValueChange={(value) => setAccountMode(value as 'arlo_tutoring' | 'tutor')}
                   className="grid grid-cols-2 gap-4"
                 >
-                  <div className="flex items-center space-x-2 border rounded-lg p-3 hover:bg-gray-50">
+                  <div className="flex items-center space-x-2 border rounded-lg p-3 hover:bg-secondary">
                     <RadioGroupItem value="arlo_tutoring" id="arlo_tutoring" />
                     <Label htmlFor="arlo_tutoring" className="flex items-center gap-2 cursor-pointer">
                       <GraduationCap className="w-4 h-4 text-indigo-500" />
                       Student
                     </Label>
                   </div>
-                  <div className="flex items-center space-x-2 border rounded-lg p-3 hover:bg-gray-50">
+                  <div className="flex items-center space-x-2 border rounded-lg p-3 hover:bg-secondary">
                     <RadioGroupItem value="tutor" id="tutor" />
                     <Label htmlFor="tutor" className="flex items-center gap-2 cursor-pointer">
                       <Users className="w-4 h-4 text-purple-500" />
@@ -234,11 +234,11 @@ const Auth = () => {
 
             {isSignUp && (
               <div className="space-y-2">
-                <Label htmlFor="fullName" className="text-sm font-medium text-gray-700">
+                <Label htmlFor="fullName" className="text-sm font-medium text-foreground">
                   Full Name
                 </Label>
                 <div className="relative">
-                  <User className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="fullName"
                     type="text"
@@ -253,11 +253,11 @@ const Auth = () => {
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-sm font-medium text-gray-700">
+              <Label htmlFor="email" className="text-sm font-medium text-foreground">
                 Email
               </Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="email"
                   type="email"
@@ -271,11 +271,11 @@ const Auth = () => {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-sm font-medium text-gray-700">
+              <Label htmlFor="password" className="text-sm font-medium text-foreground">
                 Password
               </Label>
               <div className="relative">
-                <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="password"
                   type="password"
@@ -292,11 +292,11 @@ const Auth = () => {
             {/* Tutor Code Input for Students */}
             {isSignUp && accountMode === 'arlo_tutoring' && (
               <div className="space-y-2">
-                <Label htmlFor="tutorCode" className="text-sm font-medium text-gray-700">
+                <Label htmlFor="tutorCode" className="text-sm font-medium text-foreground">
                   Tutor Code (Optional)
                 </Label>
                 <div className="relative">
-                  <UserPlus className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <UserPlus className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="tutorCode"
                     type="text"
@@ -307,7 +307,7 @@ const Auth = () => {
                     maxLength={6}
                   />
                 </div>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-muted-foreground">
                   Have a tutor code? Enter it here to connect during signup, or connect later.
                 </p>
               </div>
@@ -315,7 +315,7 @@ const Auth = () => {
 
             <Button
               type="submit"
-              className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium py-2.5"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium py-2.5"
               disabled={loading}
             >
               {loading ? (
@@ -333,12 +333,12 @@ const Auth = () => {
           </form>
 
           <div className="mt-6 text-center">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-muted-foreground">
               {isSignUp ? 'Already have an ARLO account?' : "Don't have an ARLO account?"}
               <button
                 type="button"
                 onClick={() => setIsSignUp(!isSignUp)}
-                className="ml-1 text-indigo-600 hover:text-indigo-700 font-medium"
+                className="ml-1 text-primary hover:text-primary/80 font-medium"
               >
                 {isSignUp ? 'Sign In' : 'Sign Up'}
               </button>
@@ -346,7 +346,7 @@ const Auth = () => {
           </div>
         </Card>
 
-        <div className="mt-6 text-center text-sm text-gray-500">
+        <div className="mt-6 text-center text-sm text-muted-foreground">
           By continuing, you agree to ARLO's terms of service and privacy policy.
         </div>
       </div>

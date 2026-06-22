@@ -1,6 +1,9 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import PlainTextResponse
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    fitz = None
 from app.services.llm import client
 import os
 import asyncio
@@ -72,7 +75,7 @@ class EnhancedPDFProcessor:
             logger.error(f"PDF extraction error: {e}")
             raise HTTPException(status_code=500, detail=f"Error extracting PDF content: {str(e)}")
     
-    def _extract_page_content(self, doc: fitz.Document, page_num: int) -> dict:
+    def _extract_page_content(self, doc, page_num: int) -> dict:
         """Extract content from a single page with multiple methods"""
         page = doc[page_num]
         
@@ -203,8 +206,8 @@ class IntelligentChunker:
 # -----------------------------
 # AI Processing
 # -----------------------------
-async def process_with_gpt5_nano(text: str) -> str:
-    """Process text with GPT-5-nano for better quality and reliability"""
+async def process_with_llm(text: str) -> str:
+    """Process text with LLM for better quality and reliability"""
     
     system_prompt = """You are an AI tutor helping design a personalized study plan from a student's document.
 
@@ -225,14 +228,13 @@ Focus on content that would help a student learn and understand the subject matt
         ]
 
         response = client.chat.completions.create(
-            messages=messages,
-            reasoning_effort="low"
+            messages=messages
         )
 
         return response.choices[0].message.content.strip()
         
     except Exception as e:
-        logger.error(f"GPT-5-nano processing failed: {e}")
+        logger.error(f"LLM processing failed: {e}")
         # Fallback to a basic summary if AI fails
         return f"Academic Content Summary:\n\n{text[:2000]}..." if len(text) > 2000 else text
 
@@ -253,7 +255,7 @@ async def parse_pdf(file: UploadFile = File(...)):
     - Better text extraction (handles images, tables, formatting)
     - Processes more pages (up to 100 instead of 4)
     - Intelligent chunking for large documents
-    - GPT-5-nano for better quality summaries
+    - LLM for better quality summaries
     - Enhanced text cleaning and formatting
     """
     
@@ -290,7 +292,7 @@ async def parse_pdf(file: UploadFile = File(...)):
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                 chunk_futures = [
                     executor.submit(
-                        lambda chunk: asyncio.run(process_with_gpt5_nano(chunk)),
+                        lambda chunk: asyncio.run(process_with_llm(chunk)),
                         chunk
                     ) 
                     for chunk in chunks[:8]  # Process up to 8 chunks for performance
@@ -309,10 +311,10 @@ async def parse_pdf(file: UploadFile = File(...)):
                 summary = "\n\n---\n\n".join(chunk_results)
             else:
                 # Fallback: process first part of text
-                summary = await process_with_gpt5_nano(text[:6000])
+                summary = await process_with_llm(text[:6000])
         else:
             # Process entire text if it's small enough
-            summary = await process_with_gpt5_nano(text)
+            summary = await process_with_llm(text)
         
         # Return same format as original (PlainTextResponse)
         return summary

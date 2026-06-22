@@ -314,8 +314,11 @@ def generate_gpt_plan(
 
     input_messages = [
         {"role": "system", "content": GPT_SYSTEM_PROMPT},
+        {"role": "user", "content": "Example study plan for a 60-minute Biology session:"},
         {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_1},
+        {"role": "user", "content": "Example study plan for a 45-minute Math session:"},
         {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_2},
+        {"role": "user", "content": "Example study plan for a 30-minute History session:"},
         {"role": "assistant", "content": ASSISTANT_EXAMPLE_JSON_3},
         {"role": "user", "content": prompt},
     ]
