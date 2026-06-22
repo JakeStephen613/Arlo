@@ -592,76 +592,51 @@ How can I help you with this topic?`,
   };
 
   return (
-    <div className="h-full flex flex-col relative z-0">
-      {/* Lower z-index background */}
-      <div className="absolute inset-0 bg-transparent backdrop-blur-sm rounded-2xl border border-indigo-200/10 shadow-2xl shadow-indigo-500/5"></div>
-      
-      <div className="relative z-20 flex flex-col h-full">
-        <div className="pb-3 flex-shrink-0">
-          <ArloHeader
-            currentBlock={currentBlock}
-            isExpanded={isExpanded}
-            onToggleExpand={onToggleExpand}
-          />
-          
-          {/* Enhanced Explain This Button */}
-          <div className="flex justify-center py-4">
-            <Button
-              onClick={handleExplainThis}
-              disabled={isExplaining}
-              className="bg-gradient-to-r from-indigo-500 via-indigo-600 to-indigo-700 hover:from-indigo-600 hover:via-indigo-700 hover:to-indigo-800 text-white px-8 py-4 text-lg font-bold shadow-2xl hover:shadow-indigo-500/25 transition-all duration-300 rounded-2xl border border-white/20 backdrop-blur-md relative overflow-hidden group"
-              size="lg"
-            >
-              {/* Animated background gradient */}
-              <div className="absolute inset-0 bg-gradient-to-r from-indigo-400/30 to-indigo-600/30 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-              
-              <div className="relative z-10 flex items-center">
-                {isExplaining ? (
-                  <>
-                    <div className="w-6 h-6 mr-3 relative">
-                      <div className="absolute inset-0 border-2 border-white/30 rounded-full"></div>
-                      <div className="absolute inset-0 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    </div>
-                    Getting AI explanation...
-                  </>
-                ) : (
-                  <>
-                    <Brain className="w-6 h-6 mr-3 animate-pulse" />
-                    🧠 Ask AI to Explain This
-                  </>
-                )}
-              </div>
-            </Button>
-          </div>
+    <div className="h-full flex flex-col rounded-xl border bg-card shadow-sm overflow-hidden">
+      <ArloHeader
+        currentBlock={currentBlock}
+        isExpanded={isExpanded}
+        onToggleExpand={onToggleExpand}
+      />
 
-          {apiError && (
-            <div className="mx-4 bg-red-500/20 backdrop-blur-sm border border-red-300/30 rounded-xl p-4 mt-2">
-              <p className="text-sm text-red-100 font-medium flex items-center">
-                <span className="w-2 h-2 bg-red-400 rounded-full mr-2 animate-pulse"></span>
-                ⚠️ AI services temporarily unavailable
-              </p>
-            </div>
+      {/* Explain This */}
+      <div className="px-3 py-2 border-b">
+        <Button
+          onClick={handleExplainThis}
+          disabled={isExplaining}
+          variant="secondary"
+          size="sm"
+          className="w-full text-xs"
+        >
+          {isExplaining ? (
+            <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> Explaining...</>
+          ) : (
+            <><Brain className="w-3 h-3 mr-1.5" /> Explain this</>
           )}
-        </div>
+        </Button>
+      </div>
 
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-          <ArloMessages
-            messages={messages}
-            isTyping={isTyping}
-            onSaveResponse={saveResponseToMemory}
-          />
-          <div className="flex-shrink-0">
-            <ArloInput
-              inputText={inputText}
-              onInputChange={setInputText}
-              onSendMessage={() => sendMessage()}
-              isTyping={isTyping}
-              voiceTranscript=""
-              isRecording={false}
-              isSpeaking={isSpeaking}
-            />
-          </div>
+      {apiError && (
+        <div className="mx-3 mt-2 rounded-lg bg-destructive/10 border border-destructive/20 p-2">
+          <p className="text-xs text-destructive">Service temporarily unavailable</p>
         </div>
+      )}
+
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <ArloMessages
+          messages={messages}
+          isTyping={isTyping}
+          onSaveResponse={saveResponseToMemory}
+        />
+        <ArloInput
+          inputText={inputText}
+          onInputChange={setInputText}
+          onSendMessage={() => sendMessage()}
+          isTyping={isTyping}
+          voiceTranscript=""
+          isRecording={false}
+          isSpeaking={isSpeaking}
+        />
       </div>
     </div>
   );

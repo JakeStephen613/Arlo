@@ -14,6 +14,7 @@ import { Progress } from '@/components/ui/progress';
 import { apiGet } from '@/lib/apiClient';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import PausedSessionsDisplay from '@/components/PausedSessionsDisplay';
 
 interface ConceptSnapshot {
   concept_id: string;
@@ -119,6 +120,8 @@ export default function Index() {
         </div>
         <ArrowRight className="w-5 h-5 text-white opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
       </button>
+
+      <PausedSessionsDisplay onResumeSession={(id) => navigate('/session', { state: { resumeSessionId: id } })} />
 
       {isEmpty ? (
         <EmptyState onStart={() => navigate('/session')} />

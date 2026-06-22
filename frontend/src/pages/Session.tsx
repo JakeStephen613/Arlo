@@ -12,7 +12,6 @@ import {
   AlertCircle,
   Send,
   RefreshCw,
-  ChevronDown,
   Layers,
   Zap,
   Brain,
@@ -125,6 +124,7 @@ export default function Session() {
   const navigate = useNavigate();
   const location = useLocation();
   const prefillTopic = (location.state as any)?.prefillTopic || '';
+  const resumeSessionId = (location.state as any)?.resumeSessionId || null;
 
   // Try to restore a saved session
   const savedState = useRef(loadSessionState());
@@ -143,6 +143,33 @@ export default function Session() {
   const [preloadedContent, setPreloadedContent] = useState<Record<string, boolean>>({});
 
   const [planLoading, setPlanLoading] = useState(false);
+
+  // Resume from Supabase paused session
+  useEffect(() => {
+    if (!resumeSessionId) return;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('paused_sessions')
+          .select('*')
+          .eq('id', resumeSessionId)
+          .single();
+        if (error || !data) return;
+        const sessionPlan = data.session_plan as unknown as StudyPlan;
+        setPlan(sessionPlan);
+        const expanded = expandBlocks(sessionPlan.blocks);
+        setSubBlocks(expanded);
+        setCurrentSubBlockIndex(data.current_block_index || 0);
+        setTopic(data.title || '');
+        setPhase('studying');
+        setShowResumePrompt(false);
+        // Remove the paused session from DB
+        await supabase.from('paused_sessions').delete().eq('id', resumeSessionId);
+      } catch (e) {
+        console.error('Failed to resume paused session:', e);
+      }
+    })();
+  }, [resumeSessionId]);
 
   // Persist session state on changes
   useEffect(() => {
@@ -167,6 +194,27 @@ export default function Session() {
     setCurrentSubBlockIndex(0);
     setScores([]);
     setShowResumePrompt(false);
+  };
+
+  const pauseAndExit = async () => {
+    if (!plan) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      await supabase.from('paused_sessions').upsert({
+        user_id: user.id,
+        title: plan.topic || topic,
+        session_plan: plan as any,
+        current_block_index: currentSubBlockIndex,
+        paused_at: new Date().toISOString(),
+        expires_at: expiresAt,
+      }, { onConflict: 'user_id' });
+    } catch (e) {
+      console.error('Failed to save paused session:', e);
+    }
+    clearSessionState();
+    navigate('/');
   };
 
   const generatePlan = async () => {
@@ -294,6 +342,7 @@ export default function Session() {
           currentIndex={currentSubBlockIndex}
           scores={scores}
           onComplete={handleSubBlockComplete}
+          onPause={pauseAndExit}
         />
       )}
       {phase === 'summary' && plan && (
@@ -548,12 +597,13 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete }: {
+function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPause }: {
   plan: StudyPlan;
   subBlocks: ExpandedSubBlock[];
   currentIndex: number;
   scores: BlockScore[];
   onComplete: (score: number) => void;
+  onPause: () => void;
 }) {
   const current = subBlocks[currentIndex];
   const currentBlockIndex = current.blockIndex;
@@ -663,6 +713,14 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete }: {
             </div>
           );
         })}
+
+        <button
+          onClick={onPause}
+          className="mt-4 w-full flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+        >
+          <Pause className="w-3 h-3" />
+          Pause & Exit
+        </button>
       </div>
 
       {/* Main content */}
@@ -742,7 +800,6 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
   const [sections, setSections] = useState<string[]>([]);
   const [currentSection, setCurrentSection] = useState('');
   const [streaming, setStreaming] = useState(true);
-  const [visibleSections, setVisibleSections] = useState(0);
   const [checkQuestions, setCheckQuestions] = useState<{ question: string; afterSection: number }[]>([]);
   const [checkAnswers, setCheckAnswers] = useState<Record<number, string>>({});
   const [checkResults, setCheckResults] = useState<Record<number, { correct: boolean; explanation: string }>>({});
@@ -814,7 +871,6 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
                 setSections(finalSections);
                 setCurrentSection('');
                 setStreaming(false);
-                setVisibleSections(1);
               } else if (evt.type === 'error') {
                 setError(evt.message || 'Streaming error');
                 setStreaming(false);
@@ -834,14 +890,27 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
     return () => ac.abort();
   }, [block.id, retryCount]);
 
-  useEffect(() => {
-    if (!streaming && visibleSections === 0 && sections.length > 0) {
-      setVisibleSections(1);
-    }
-  }, [streaming, sections.length, visibleSections]);
+  const sectionRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [activeSection, setActiveSection] = useState(0);
 
-  const showMore = () => setVisibleSections(prev => Math.min(prev + 2, sections.length));
-  const allVisible = visibleSections >= sections.length;
+  useEffect(() => {
+    if (streaming || sections.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const idx = Number((entry.target as HTMLElement).dataset.idx);
+            if (!isNaN(idx)) setActiveSection(idx);
+          }
+        }
+      },
+      { threshold: 0.6 }
+    );
+    sectionRefs.current.forEach((el) => { if (el) observer.observe(el); });
+    return () => observer.disconnect();
+  }, [streaming, sections.length]);
+
+
 
   const handleCheckSubmit = async (idx: number) => {
     const q = checkQuestions[idx];
@@ -985,10 +1054,29 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
       )}
 
       {!streaming && sections.length > 0 && (
-        <div className="space-y-4">
-          {sections.slice(0, visibleSections).map((section, i) => (
-            <div key={i}>
-              <div className="rounded-xl border bg-card p-6 animate-fade-in">
+        <div className="space-y-6">
+          {sections.map((section, i) => (
+            <div
+              key={i}
+              ref={(el) => { sectionRefs.current[i] = el; }}
+              data-idx={i}
+              className="transition-all duration-500 ease-out"
+              style={{
+                opacity: i === activeSection ? 1 : i < activeSection ? 0.3 : 0.5,
+                transform: i === activeSection ? 'scale(1)' : i < activeSection ? 'scale(0.97)' : 'scale(0.99)',
+                filter: i === activeSection ? 'none' : 'blur(0.5px)',
+              }}
+            >
+              <div className="rounded-xl border bg-card p-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className={cn(
+                    'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold',
+                    i === activeSection ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
+                  )}>
+                    {i + 1}
+                  </div>
+                  <span className="text-xs text-muted-foreground">{i + 1} of {sections.length}</span>
+                </div>
                 <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
                   {formatTeachingText(section)}
                 </div>
@@ -997,48 +1085,38 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
             </div>
           ))}
 
-          {!allVisible ? (
-            <button
-              onClick={showMore}
-              className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-forest-300 dark:border-forest-700 py-4 text-sm font-medium text-forest-600 dark:text-forest-300 hover:bg-forest-50 dark:hover:bg-forest-900/20 transition-colors"
-            >
-              <ChevronDown className="w-4 h-4" />
-              Continue reading
-            </button>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex gap-2">
-                <input
-                  value={followUp}
-                  onChange={e => setFollowUp(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleFollowUp(); }}
-                  placeholder='Ask a follow-up or "explain that differently"...'
-                  className="flex-1 rounded-lg border bg-card px-4 py-3 text-sm focus:outline-none focus:border-primary transition-colors"
-                />
-                <button
-                  onClick={handleFollowUp}
-                  disabled={!followUp.trim() || followUpStreaming}
-                  className="rounded-lg bg-forest-600 px-4 py-3 text-white hover:bg-forest-700 transition-colors disabled:opacity-40"
-                >
-                  <MessageSquare className="w-4 h-4" />
-                </button>
-              </div>
-
-              {followUpContent && (
-                <div className="rounded-xl border bg-card p-5 text-sm text-foreground whitespace-pre-wrap leading-relaxed animate-fade-in">
-                  {followUpContent}
-                  {followUpStreaming && <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />}
-                </div>
-              )}
-
+          <div className="space-y-4 pt-2">
+            <div className="flex gap-2">
+              <input
+                value={followUp}
+                onChange={e => setFollowUp(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleFollowUp(); }}
+                placeholder='Ask a follow-up or "explain that differently"...'
+                className="flex-1 rounded-lg border bg-card px-4 py-3 text-sm focus:outline-none focus:border-primary transition-colors"
+              />
               <button
-                onClick={() => onComplete(0.5)}
-                className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+                onClick={handleFollowUp}
+                disabled={!followUp.trim() || followUpStreaming}
+                className="rounded-lg bg-forest-600 px-4 py-3 text-white hover:bg-forest-700 transition-colors disabled:opacity-40"
               >
-                I understand — continue to practice
+                <MessageSquare className="w-4 h-4" />
               </button>
             </div>
-          )}
+
+            {followUpContent && (
+              <div className="rounded-xl border bg-card p-5 text-sm text-foreground whitespace-pre-wrap leading-relaxed animate-fade-in">
+                {followUpContent}
+                {followUpStreaming && <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />}
+              </div>
+            )}
+
+            <button
+              onClick={() => onComplete(0.5)}
+              className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              I understand — continue to practice
+            </button>
+          </div>
         </div>
       )}
     </div>

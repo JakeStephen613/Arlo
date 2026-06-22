@@ -100,14 +100,14 @@ FORMATTING RULES (STRICT - FOLLOW EXACTLY):
 - Do NOT use ``` or backticks.
 - Use "- " or "* " for bullet points.
 - Start each new section with a clear section title on its own line, followed by a blank line.
-- Each section should be 70-130 words. Short, digestible chunks.
+- Each section should be 60-100 words. Keep it SHORT and punchy.
 
 STRUCTURE:
-- Write 6-10 sections, each covering 1-2 subtopics.
-- Cover the topic comprehensively but only mention information relevant to understanding it.
-- After section 3, insert: [CHECK] a recall question about what was just taught [/CHECK]
-- After section 6, insert: [CHECK] a second recall question [/CHECK]
-- End with a brief "Key Takeaways" section summarizing the 3-5 most important points.
+- Write exactly 4-5 sections, each covering one key idea.
+- Be concise. The student should be able to read the entire lesson in 2-3 minutes.
+- After section 2, insert: [CHECK] a recall question about what was just taught [/CHECK]
+- After section 4, insert: [CHECK] a second recall question [/CHECK]
+- End with a brief "Key Takeaways" section (3 bullet points max).
 
 EXAMPLES OF GOOD TEACHING STYLE:
 
