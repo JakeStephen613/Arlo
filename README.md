@@ -3,6 +3,10 @@
 An AI-powered study session generator. Enter a topic or upload notes, get a
 personalized study plan with flashcards, Feynman technique, quiz, and blurting exercises.
 
+Please email Jake at js6781@princeton.edu if you would like an account to try it out. 
+
+URL: https://arlo-frontend.onrender.com
+
 ## Architecture
 
 ```
