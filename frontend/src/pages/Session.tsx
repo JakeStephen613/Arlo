@@ -893,7 +893,7 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
   }, [block.id, retryCount]);
 
   const sectionRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const [activeSection, setActiveSection] = useState(0);
+  const [sectionOpacities, setSectionOpacities] = useState<number[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -909,19 +909,18 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
       const viewportHeight = scrollParent instanceof Window ? window.innerHeight : scrollEl.clientHeight;
       const center = viewportTop + viewportHeight / 2;
 
-      let closest = 0;
-      let closestDist = Infinity;
+      const opacities: number[] = [];
       sectionRefs.current.forEach((el, i) => {
-        if (!el) return;
+        if (!el) { opacities.push(0.3); return; }
         const rect = el.getBoundingClientRect();
         const elCenter = rect.top + rect.height / 2;
         const dist = Math.abs(elCenter - center);
-        if (dist < closestDist) {
-          closestDist = dist;
-          closest = i;
-        }
+        const normalized = dist / (viewportHeight / 2);
+        // Fully visible within ~40% of viewport center, fades to 0.3 at edges
+        const opacity = Math.max(0.3, 1 - Math.pow(Math.max(0, normalized - 0.4), 1.5) * 2);
+        opacities.push(Math.min(1, opacity));
       });
-      setActiveSection(closest);
+      setSectionOpacities(opacities);
     };
 
     const target = scrollParent instanceof Window ? window : scrollParent;
@@ -1062,40 +1061,55 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
 
       {(sections.length > 0 || currentSection) && (
         <div className="space-y-6" ref={containerRef}>
-          {sections.map((section, i) => (
-            <div
-              key={i}
-              ref={(el) => { sectionRefs.current[i] = el; }}
-              className="transition-all duration-400 ease-out"
-              style={{
-                opacity: i === activeSection ? 1 : 0.35,
-                transform: i === activeSection ? 'scale(1)' : 'scale(0.98)',
-              }}
-            >
-              <div className={cn(
-                'rounded-xl border p-6 transition-colors duration-400',
-                i === activeSection ? 'bg-card border-primary/30' : 'bg-card/60'
-              )}>
-                <div className="flex items-center gap-2 mb-3">
-                  <div className={cn(
-                    'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors',
-                    i === activeSection ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
-                  )}>
-                    {i + 1}
+          {sections.map((section, i) => {
+            const opacity = sectionOpacities[i] ?? 1;
+            const isHighlighted = opacity > 0.85;
+            return (
+              <div
+                key={i}
+                ref={(el) => { sectionRefs.current[i] = el; }}
+                className="transition-all duration-300 ease-out"
+                style={{ opacity }}
+              >
+                <div className={cn(
+                  'rounded-xl border p-6 transition-colors duration-300',
+                  isHighlighted ? 'bg-card border-primary/30' : 'bg-card/60'
+                )}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className={cn(
+                      'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors',
+                      isHighlighted ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
+                    )}>
+                      {i + 1}
+                    </div>
+                    {!streaming && (
+                      <span className="text-xs text-muted-foreground">{i + 1} of {sections.length}</span>
+                    )}
                   </div>
-                  {!streaming && (
-                    <span className="text-xs text-muted-foreground">{i + 1} of {sections.length}</span>
-                  )}
+                  <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
+                    {formatTeachingText(section)}
+                  </div>
                 </div>
-                <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
-                  {formatTeachingText(section)}
-                </div>
+                {!streaming && checkQuestions.map((cq, ci) => cq.afterSection === i ? renderCheck(ci) : null)}
               </div>
-              {!streaming && checkQuestions.map((cq, ci) => cq.afterSection === i ? renderCheck(ci) : null)}
-            </div>
-          ))}
+            );
+          })}
 
-          {streaming && sections.length === 0 && (
+          {streaming && currentSection && (
+            <div className="rounded-xl border bg-card/60 p-6" style={{ opacity: sectionOpacities.length === 0 ? 1 : 0.5 }}>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center text-xs font-bold text-muted-foreground">
+                  {sections.length + 1}
+                </div>
+                <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+              </div>
+              <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
+                {formatTeachingText(currentSection)}
+              </div>
+            </div>
+          )}
+
+          {streaming && sections.length === 0 && !currentSection && (
             <div className="rounded-xl border bg-card p-6 flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
               <span className="text-sm text-muted-foreground">Generating lesson...</span>
