@@ -892,23 +892,34 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
 
   const sectionRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [activeSection, setActiveSection] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (streaming || sections.length === 0) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            const idx = Number((entry.target as HTMLElement).dataset.idx);
-            if (!isNaN(idx)) setActiveSection(idx);
-          }
+    if (sections.length === 0) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const viewportCenter = window.innerHeight / 2;
+      let closest = 0;
+      let closestDist = Infinity;
+      sectionRefs.current.forEach((el, i) => {
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const elCenter = rect.top + rect.height / 2;
+        const dist = Math.abs(elCenter - viewportCenter);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closest = i;
         }
-      },
-      { threshold: 0.6 }
-    );
-    sectionRefs.current.forEach((el) => { if (el) observer.observe(el); });
-    return () => observer.disconnect();
-  }, [streaming, sections.length]);
+      });
+      setActiveSection(closest);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [sections.length]);
 
 
 
@@ -1040,52 +1051,57 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
         </div>
       </div>
 
-      {streaming && (
-        <div className="rounded-xl border bg-card p-6 space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-            <span className="text-sm text-muted-foreground">Generating lesson...</span>
-          </div>
-          <div className="text-foreground leading-relaxed whitespace-pre-wrap">
-            {currentSection}
-            <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
-          </div>
-        </div>
-      )}
-
-      {!streaming && sections.length > 0 && (
-        <div className="space-y-6">
+      {(sections.length > 0 || currentSection) && (
+        <div className="space-y-6" ref={containerRef}>
           {sections.map((section, i) => (
             <div
               key={i}
               ref={(el) => { sectionRefs.current[i] = el; }}
-              data-idx={i}
-              className="transition-all duration-500 ease-out"
+              className="transition-all duration-400 ease-out"
               style={{
-                opacity: i === activeSection ? 1 : i < activeSection ? 0.3 : 0.5,
-                transform: i === activeSection ? 'scale(1)' : i < activeSection ? 'scale(0.97)' : 'scale(0.99)',
-                filter: i === activeSection ? 'none' : 'blur(0.5px)',
+                opacity: i === activeSection ? 1 : 0.35,
+                transform: i === activeSection ? 'scale(1)' : 'scale(0.98)',
               }}
             >
-              <div className="rounded-xl border bg-card p-6">
+              <div className={cn(
+                'rounded-xl border p-6 transition-colors duration-400',
+                i === activeSection ? 'bg-card border-primary/30' : 'bg-card/60'
+              )}>
                 <div className="flex items-center gap-2 mb-3">
                   <div className={cn(
-                    'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold',
+                    'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors',
                     i === activeSection ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
                   )}>
                     {i + 1}
                   </div>
-                  <span className="text-xs text-muted-foreground">{i + 1} of {sections.length}</span>
+                  {!streaming && (
+                    <span className="text-xs text-muted-foreground">{i + 1} of {sections.length}</span>
+                  )}
                 </div>
                 <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
                   {formatTeachingText(section)}
                 </div>
               </div>
-              {checkQuestions.map((cq, ci) => cq.afterSection === i ? renderCheck(ci) : null)}
+              {!streaming && checkQuestions.map((cq, ci) => cq.afterSection === i ? renderCheck(ci) : null)}
             </div>
           ))}
 
-          <div className="space-y-4 pt-2">
+          {streaming && currentSection && (
+            <div className="rounded-xl border bg-card p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
+                  <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                </div>
+                <span className="text-xs text-muted-foreground">Writing...</span>
+              </div>
+              <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
+                {formatTeachingText(currentSection)}
+                <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
+              </div>
+            </div>
+          )}
+
+          {!streaming && <div className="space-y-4 pt-2">
             <div className="flex gap-2">
               <input
                 value={followUp}
@@ -1116,7 +1132,7 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
             >
               I understand — continue to practice
             </button>
-          </div>
+          </div>}
         </div>
       )}
     </div>
