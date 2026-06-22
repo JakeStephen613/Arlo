@@ -651,9 +651,9 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPau
   const progressPct = Math.round((currentIndex / subBlocks.length) * 100);
 
   return (
-    <div className="flex-1 flex gap-6 py-4 h-[calc(100vh-6rem)] overflow-hidden">
-      {/* Sidebar */}
-      <div className="hidden md:block w-56 shrink-0 space-y-2 overflow-y-auto">
+    <div className="fixed inset-0 lg:left-56 flex gap-6 p-4 bg-background z-10">
+      {/* Study plan sidebar — fixed, scrolls independently */}
+      <div className="hidden md:flex md:flex-col w-56 shrink-0 space-y-2 overflow-y-auto">
         {/* Pomodoro Timer */}
         <div className="rounded-lg border bg-card p-3 mb-4">
           <div className="flex items-center justify-between mb-2">
@@ -723,7 +723,7 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPau
         </button>
       </div>
 
-      {/* Main content */}
+      {/* Main content — fills remaining space, scrolls independently */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {/* Progress bar */}
         <div className="mb-4 shrink-0">
@@ -736,9 +736,17 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPau
           </div>
         </div>
 
-        {/* Mode component — scrollable independently */}
-        <div className="flex-1 overflow-y-auto pr-2">
-          <ModeView subBlock={current} onComplete={onComplete} />
+        {/* Scrollable content with top/bottom edge fade */}
+        <div
+          className="flex-1 overflow-y-auto pr-2"
+          style={{
+            maskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)',
+          }}
+        >
+          <div className="py-[15vh]">
+            <ModeView subBlock={current} onComplete={onComplete} />
+          </div>
         </div>
       </div>
 
@@ -892,42 +900,7 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
     return () => ac.abort();
   }, [block.id, retryCount]);
 
-  const sectionRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const [sectionOpacities, setSectionOpacities] = useState<number[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (sections.length === 0) return;
-    const container = containerRef.current;
-    if (!container) return;
-
-    const scrollParent = container.closest('[class*="overflow-y-auto"]') || window;
-
-    const handleScroll = () => {
-      const scrollEl = scrollParent instanceof Window ? document.documentElement : scrollParent as HTMLElement;
-      const viewportTop = scrollParent instanceof Window ? 0 : scrollEl.getBoundingClientRect().top;
-      const viewportHeight = scrollParent instanceof Window ? window.innerHeight : scrollEl.clientHeight;
-      const center = viewportTop + viewportHeight / 2;
-
-      const opacities: number[] = [];
-      sectionRefs.current.forEach((el, i) => {
-        if (!el) { opacities.push(0.3); return; }
-        const rect = el.getBoundingClientRect();
-        const elCenter = rect.top + rect.height / 2;
-        const dist = Math.abs(elCenter - center);
-        const normalized = dist / (viewportHeight / 2);
-        // Fully visible within ~40% of viewport center, fades to 0.3 at edges
-        const opacity = Math.max(0.3, 1 - Math.pow(Math.max(0, normalized - 0.4), 1.5) * 2);
-        opacities.push(Math.min(1, opacity));
-      });
-      setSectionOpacities(opacities);
-    };
-
-    const target = scrollParent instanceof Window ? window : scrollParent;
-    target.addEventListener('scroll', handleScroll, { passive: true });
-    handleScroll();
-    return () => target.removeEventListener('scroll', handleScroll);
-  }, [sections.length]);
 
 
 
@@ -1061,42 +1034,27 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
 
       {(sections.length > 0 || currentSection) && (
         <div className="space-y-6" ref={containerRef}>
-          {sections.map((section, i) => {
-            const opacity = sectionOpacities[i] ?? 1;
-            const isHighlighted = opacity > 0.85;
-            return (
-              <div
-                key={i}
-                ref={(el) => { sectionRefs.current[i] = el; }}
-                className="transition-all duration-300 ease-out"
-                style={{ opacity }}
-              >
-                <div className={cn(
-                  'rounded-xl border p-6 transition-colors duration-300',
-                  isHighlighted ? 'bg-card border-primary/30' : 'bg-card/60'
-                )}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className={cn(
-                      'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors',
-                      isHighlighted ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
-                    )}>
-                      {i + 1}
-                    </div>
-                    {!streaming && (
-                      <span className="text-xs text-muted-foreground">{i + 1} of {sections.length}</span>
-                    )}
+          {sections.map((section, i) => (
+            <div key={i}>
+              <div className="rounded-xl border bg-card p-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-xs font-bold text-primary-foreground">
+                    {i + 1}
                   </div>
-                  <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
-                    {formatTeachingText(section)}
-                  </div>
+                  {!streaming && (
+                    <span className="text-xs text-muted-foreground">{i + 1} of {sections.length}</span>
+                  )}
                 </div>
-                {!streaming && checkQuestions.map((cq, ci) => cq.afterSection === i ? renderCheck(ci) : null)}
+                <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
+                  {formatTeachingText(section)}
+                </div>
               </div>
-            );
-          })}
+              {!streaming && checkQuestions.map((cq, ci) => cq.afterSection === i ? renderCheck(ci) : null)}
+            </div>
+          ))}
 
           {streaming && currentSection && (
-            <div className="rounded-xl border bg-card/60 p-6" style={{ opacity: sectionOpacities.length === 0 ? 1 : 0.5 }}>
+            <div className="rounded-xl border bg-card/60 p-6">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center text-xs font-bold text-muted-foreground">
                   {sections.length + 1}
