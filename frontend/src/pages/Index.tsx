@@ -3,59 +3,41 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   BookOpen,
-  Calendar,
-  Flame,
-  TrendingUp,
-  TrendingDown,
-  Minus,
   Clock,
+  Calendar,
+  Layers,
 } from 'lucide-react';
-import { Progress } from '@/components/ui/progress';
-import { apiGet } from '@/lib/apiClient';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import PausedSessionsDisplay from '@/components/PausedSessionsDisplay';
 
-interface ConceptSnapshot {
-  concept_id: string;
-  name: string;
-  topic: string | null;
-  mastery: number;
-  uncertainty: number;
-  streak: number;
-  next_review: string | null;
-  priority: number;
-}
-
-interface TrajectoryItem {
-  concept_name: string;
-  direction: 'improving' | 'struggling' | 'stable';
-  mastery: number;
-}
-
-interface TutorBriefing {
-  user_id: string;
-  current_focus: string | null;
-  weak_concepts: ConceptSnapshot[];
-  due_reviews: ConceptSnapshot[];
-  trajectory: TrajectoryItem[];
-  total_concepts: number;
-  average_mastery: number;
-  study_streak_days: number;
+interface SessionRecord {
+  id: string;
+  topic: string;
+  duration_minutes: number;
+  timestamp: string;
 }
 
 export default function Index() {
   const navigate = useNavigate();
-  const [briefing, setBriefing] = useState<TutorBriefing | null>(null);
+  const { user, userProfile, updateProfile } = useAuth();
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiGet<TutorBriefing>('/learner/briefing')
-      .then(setBriefing)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
+    if (!user) { setLoading(false); return; }
+    supabase
+      .from('study_session_data')
+      .select('id, topic, duration_minutes, timestamp')
+      .eq('user_id', user.id)
+      .order('timestamp', { ascending: false })
+      .then(({ data }) => {
+        setSessions((data as SessionRecord[]) || []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [user]);
 
   if (loading) {
     return (
@@ -71,51 +53,49 @@ export default function Index() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <h1 className="font-display text-2xl font-bold tracking-tight">Home</h1>
-        <div className="rounded-lg border bg-card p-8 text-center text-muted-foreground">
-          <p>Could not load your learning data.</p>
-          <p className="text-sm mt-1">{error}</p>
-        </div>
-      </div>
-    );
-  }
+  const isEmpty = sessions.length === 0;
+  const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0);
+  const totalHours = Math.floor(totalMinutes / 60);
+  const remainingMins = totalMinutes % 60;
+  const timeDisplay = totalHours > 0 ? `${totalHours}h ${remainingMins}m` : `${remainingMins}m`;
+  const uniqueTopics = new Set(sessions.map(s => s.topic)).size;
+  const lastTopic = sessions[0]?.topic;
 
-  const b = briefing!;
-  const isEmpty = b.total_concepts === 0;
-  const masteryPct = Math.round(b.average_mastery * 100);
+  const formatDate = (ts: string) => {
+    const d = new Date(ts);
+    const now = new Date();
+    const diff = now.getTime() - d.getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Yesterday';
+    if (days < 7) return `${days} days ago`;
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight">Home</h1>
-          {!isEmpty && b.current_focus && (
-            <p className="text-muted-foreground mt-0.5 text-sm">
-              Current focus: <span className="text-foreground font-medium">{b.current_focus}</span>
-            </p>
-          )}
-        </div>
+      <div>
+        <h1 className="font-display text-2xl font-bold tracking-tight">Home</h1>
+        {lastTopic && (
+          <p className="text-muted-foreground mt-0.5 text-sm">
+            Last studied: <span className="text-foreground font-medium">{lastTopic}</span>
+          </p>
+        )}
       </div>
 
       {/* CTA */}
       <button
-        onClick={() => navigate('/session', b.current_focus ? { state: { prefillTopic: b.current_focus } } : undefined)}
+        onClick={() => navigate('/session', lastTopic ? { state: { prefillTopic: lastTopic } } : undefined)}
         className="w-full flex items-center justify-between rounded-xl bg-forest-700 dark:bg-forest-600 p-6 transition-all hover:bg-forest-600 dark:hover:bg-forest-500 hover:shadow-card group"
       >
         <div className="text-left">
           <p className="text-sm font-medium text-white/70">
-            {b.due_reviews.length > 0 ? 'You have items due' : isEmpty ? 'Get started' : 'Keep going'}
+            {isEmpty ? 'Get started' : 'Keep going'}
           </p>
           <p className="text-lg font-bold text-white mt-0.5">
-            {b.due_reviews.length > 0
-              ? `Review ${b.due_reviews.length} due concept${b.due_reviews.length !== 1 ? 's' : ''}`
-              : isEmpty
-                ? 'Start your first session'
-                : `Continue with ${b.current_focus || 'your studies'}`}
+            {isEmpty
+              ? 'Start your first session'
+              : `Continue with ${lastTopic || 'your studies'}`}
           </p>
         </div>
         <ArrowRight className="w-5 h-5 text-white opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
@@ -124,49 +104,81 @@ export default function Index() {
       <PausedSessionsDisplay onResumeSession={(id) => navigate('/session', { state: { resumeSessionId: id } })} />
 
       {isEmpty ? (
-        <EmptyState onStart={() => navigate('/session')} />
+        <EmptyState onStart={() => navigate('/session')} userProfile={userProfile} updateProfile={updateProfile} />
       ) : (
         <>
-          {/* Stats row */}
+          {/* Real stats */}
           <div className="grid gap-4 sm:grid-cols-3">
             <StatCard
               icon={<BookOpen className="w-4 h-4" />}
-              label="Concepts tracked"
-              value={b.total_concepts}
+              label="Sessions completed"
+              value={sessions.length}
             />
             <StatCard
-              icon={<Calendar className="w-4 h-4" />}
-              label="Due for review"
-              value={b.due_reviews.length}
-              accent={b.due_reviews.length > 0}
+              icon={<Clock className="w-4 h-4" />}
+              label="Total study time"
+              value={timeDisplay}
             />
             <StatCard
-              icon={<Flame className="w-4 h-4" />}
-              label="Study streak"
-              value={`${b.study_streak_days}d`}
+              icon={<Layers className="w-4 h-4" />}
+              label="Topics studied"
+              value={uniqueTopics}
             />
           </div>
 
-          {/* Overall mastery */}
+          {/* Recent sessions */}
           <div className="rounded-lg border bg-card p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-medium text-foreground">Overall mastery</span>
-              <span className="text-sm font-semibold text-primary">{masteryPct}%</span>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-medium text-foreground">Recent sessions</h3>
+              <button
+                onClick={() => navigate('/library')}
+                className="text-xs text-primary hover:underline"
+              >
+                View all
+              </button>
             </div>
-            <Progress value={masteryPct} className="h-2" />
+            <div className="space-y-2">
+              {sessions.slice(0, 5).map(s => (
+                <div
+                  key={s.id}
+                  className="flex items-center justify-between text-sm py-2 cursor-pointer hover:bg-secondary/30 rounded-md px-2 -mx-2 transition-colors"
+                  onClick={() => navigate('/session', { state: { prefillTopic: s.topic } })}
+                >
+                  <div className="flex items-center gap-3">
+                    <BookOpen className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-foreground">{s.topic}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>{s.duration_minutes} min</span>
+                    <span>{formatDate(s.timestamp)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
 
-          {/* Mastery heatmap */}
-          <MasteryMap concepts={[
-            ...b.weak_concepts,
-            ...b.due_reviews.filter(d => !b.weak_concepts.some(w => w.concept_id === d.concept_id)),
-          ]} allCount={b.total_concepts} averageMastery={b.average_mastery} />
-
-          {/* Trajectory */}
-          {b.trajectory.length > 0 && <Trajectory items={b.trajectory} />}
-
-          {/* Due reviews list */}
-          {b.due_reviews.length > 0 && <DueReviews items={b.due_reviews} />}
+          {/* Topics breakdown */}
+          {uniqueTopics > 1 && (
+            <div className="rounded-lg border bg-card p-5">
+              <h3 className="text-sm font-medium text-foreground mb-3">Topics studied</h3>
+              <div className="flex flex-wrap gap-2">
+                {[...new Set(sessions.map(s => s.topic))].map(topic => {
+                  const count = sessions.filter(s => s.topic === topic).length;
+                  const mins = sessions.filter(s => s.topic === topic).reduce((sum, s) => sum + (s.duration_minutes || 0), 0);
+                  return (
+                    <div
+                      key={topic}
+                      className="rounded-md bg-primary/10 px-3 py-1.5 text-xs font-medium cursor-pointer hover:bg-primary/20 transition-colors"
+                      onClick={() => navigate('/session', { state: { prefillTopic: topic } })}
+                    >
+                      <span className="text-foreground">{topic}</span>
+                      <span className="text-muted-foreground ml-1.5">{count} session{count !== 1 ? 's' : ''} · {mins}m</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -176,8 +188,11 @@ export default function Index() {
 
 const GRADE_LEVELS = ['Middle School', 'High School', 'Undergraduate', 'Graduate', 'Self-study'];
 
-function EmptyState({ onStart }: { onStart: () => void }) {
-  const { userProfile, updateProfile } = useAuth();
+function EmptyState({ onStart, userProfile, updateProfile }: {
+  onStart: () => void;
+  userProfile: any;
+  updateProfile: (data: any) => Promise<void>;
+}) {
   const [step, setStep] = useState<'welcome' | 'grade' | 'goals' | 'done'>(() => {
     return userProfile?.grade_level ? 'done' : 'welcome';
   });
@@ -199,7 +214,7 @@ function EmptyState({ onStart }: { onStart: () => void }) {
         </div>
         <h2 className="font-display text-xl font-semibold mb-2">Start your first session</h2>
         <p className="text-muted-foreground text-sm max-w-sm mx-auto leading-relaxed">
-          Arlo tracks how you're doing across every concept and adapts to help you learn efficiently. Complete a study session to see your mastery data here.
+          Enter a topic and Arlo will build a study session for you. Your session history will appear here.
         </p>
         <button
           onClick={onStart}
@@ -284,11 +299,10 @@ function EmptyState({ onStart }: { onStart: () => void }) {
 }
 
 
-function StatCard({ icon, label, value, accent }: {
+function StatCard({ icon, label, value }: {
   icon: React.ReactNode;
   label: string;
   value: string | number;
-  accent?: boolean;
 }) {
   return (
     <div className="rounded-lg border bg-card p-4">
@@ -296,107 +310,9 @@ function StatCard({ icon, label, value, accent }: {
         {icon}
         <span className="text-xs font-medium">{label}</span>
       </div>
-      <p className={`text-2xl font-semibold tracking-tight ${accent ? 'text-accent' : 'text-foreground'}`}>
+      <p className="text-2xl font-semibold tracking-tight text-foreground">
         {value}
       </p>
-    </div>
-  );
-}
-
-
-function masteryColor(mastery: number): string {
-  if (mastery >= 0.85) return 'bg-primary/80';
-  if (mastery >= 0.7) return 'bg-primary/50';
-  if (mastery >= 0.5) return 'bg-accent/50';
-  if (mastery >= 0.3) return 'bg-accent/30';
-  return 'bg-muted';
-}
-
-function MasteryMap({ concepts, allCount, averageMastery }: {
-  concepts: ConceptSnapshot[];
-  allCount: number;
-  averageMastery: number;
-}) {
-  const masteredCount = allCount - concepts.length;
-
-  return (
-    <div className="rounded-lg border bg-card p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-medium text-foreground">Concept mastery</h3>
-        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-muted" /> Low</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-accent/40" /> Mid</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-primary/80" /> High</span>
-        </div>
-      </div>
-
-      {concepts.length === 0 ? (
-        <p className="text-sm text-muted-foreground">All {allCount} concepts are above 70% mastery.</p>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          {concepts.map(c => (
-            <div
-              key={c.concept_id}
-              className={`${masteryColor(c.mastery)} rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors`}
-              title={`${c.name}: ${Math.round(c.mastery * 100)}% mastery`}
-            >
-              <span className="text-foreground/80">{c.name}</span>
-              <span className="text-foreground/50 ml-1.5">{Math.round(c.mastery * 100)}%</span>
-            </div>
-          ))}
-          {masteredCount > 0 && (
-            <div className="rounded-md px-2.5 py-1.5 text-xs font-medium bg-primary/80 text-primary-foreground/80">
-              +{masteredCount} mastered
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-function Trajectory({ items }: { items: TrajectoryItem[] }) {
-  const iconMap = {
-    improving: <TrendingUp className="w-3.5 h-3.5 text-green-600" />,
-    struggling: <TrendingDown className="w-3.5 h-3.5 text-red-500" />,
-    stable: <Minus className="w-3.5 h-3.5 text-muted-foreground" />,
-  };
-
-  return (
-    <div className="rounded-lg border bg-card p-5">
-      <h3 className="text-sm font-medium text-foreground mb-3">Recent trajectory</h3>
-      <div className="space-y-2">
-        {items.map(item => (
-          <div key={item.concept_name} className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2">
-              {iconMap[item.direction]}
-              <span className="text-foreground">{item.concept_name}</span>
-            </div>
-            <span className="text-muted-foreground text-xs capitalize">{item.direction}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-
-function DueReviews({ items }: { items: ConceptSnapshot[] }) {
-  return (
-    <div className="rounded-lg border bg-card p-5">
-      <h3 className="text-sm font-medium text-foreground mb-3">Due for review</h3>
-      <div className="space-y-2">
-        {items.map(item => (
-          <div key={item.concept_id} className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2 text-foreground">
-              <Clock className="w-3.5 h-3.5 text-accent" />
-              {item.name}
-            </div>
-            <span className="text-muted-foreground text-xs">{Math.round(item.mastery * 100)}%</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
