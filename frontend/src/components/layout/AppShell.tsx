@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Home,
   BookOpen,
-  BarChart3,
   Library,
   LogOut,
   Menu,
@@ -24,7 +23,6 @@ const NAV_ITEMS = [
   { path: '/', label: 'Home', icon: Home },
   { path: '/session', label: 'Session', icon: BookOpen },
   { path: '/library', label: 'Library', icon: Library },
-  { path: '/progress', label: 'Progress', icon: BarChart3 },
   { path: '/tutor', label: 'Tutor', icon: GraduationCap },
 ];
 

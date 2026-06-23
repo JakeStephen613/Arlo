@@ -423,26 +423,26 @@ function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfCo
 
   return (
     <div className="flex-1 flex items-center justify-center py-8">
-      <div className="max-w-lg mx-auto w-full space-y-8">
+      <div className="max-w-2xl mx-auto w-full space-y-8">
         <div className="text-center">
           <h1 className="font-display text-3xl font-bold tracking-tight text-foreground">Start a study session</h1>
           <p className="text-muted-foreground mt-2">Enter a topic or upload study materials and Arlo will build a structured curriculum for you.</p>
         </div>
 
         <div className="space-y-5">
-          <input
-            type="text"
+          <textarea
             value={topic}
             onChange={e => setTopic(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && (topic.trim() || pdfContent)) onSubmit(); }}
-            placeholder="e.g. Cell Biology, Linear Algebra, World War 2..."
-            className="w-full rounded-xl border-2 bg-card px-4 py-3.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors text-center text-lg"
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && (topic.trim() || pdfContent)) { e.preventDefault(); onSubmit(); } }}
+            placeholder="e.g. Cell Biology, Linear Algebra, World War 2, or paste detailed notes..."
+            className="w-full rounded-xl border-2 bg-card px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors text-lg resize-none min-h-[60px]"
+            rows={2}
             autoFocus
           />
 
           <div className="flex items-center justify-center">
             <label className={cn(
-              'cursor-pointer rounded-lg border border-dashed px-4 py-2.5 text-sm transition-colors',
+              'cursor-pointer rounded-xl border-2 border-dashed px-8 py-4 text-base font-medium transition-colors w-full text-center',
               fileName ? 'border-primary/50 bg-primary/5 text-foreground' : 'border-muted-foreground/30 text-muted-foreground hover:border-primary/30'
             )}>
               {uploading ? 'Parsing...' : fileName ? `${fileName}` : 'Upload PDF (optional)'}

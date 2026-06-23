@@ -123,7 +123,7 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
                     <ul key={`bullets-${i}`} className="space-y-3 my-3 ml-1">
                       {bulletPoints.map((point, idx) => (
                         <li key={idx} className="text-gray-700 leading-relaxed flex items-start gap-2">
-                          <span className="inline-block w-2 h-2 mt-2 rounded-full bg-indigo-400 flex-shrink-0" />
+                          <span className="inline-block w-2 h-2 mt-2 rounded-full bg-forest-400 flex-shrink-0" />
                           <span dangerouslySetInnerHTML={{ __html: parseBoldText(point) }} />
                         </li>
                       ))}
@@ -157,7 +157,7 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
                     <ol key={`numbers-${i}`} className="space-y-3 my-3 ml-1 list-none">
                       {numberedItems.map((item, idx) => (
                         <li key={idx} className="text-gray-700 leading-relaxed flex items-start gap-2">
-                          <span className="inline-flex items-center justify-center w-5 h-5 mt-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex-shrink-0">{idx + 1}</span>
+                          <span className="inline-flex items-center justify-center w-5 h-5 mt-0.5 rounded-full bg-forest-100 text-forest-700 text-xs font-bold flex-shrink-0">{idx + 1}</span>
                           <span dangerouslySetInnerHTML={{ __html: parseBoldText(item) }} />
                         </li>
                       ))}
@@ -219,7 +219,7 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
                   <ul className="space-y-3 ml-1">
                     {bulletPoints.map((point, index) => (
                       <li key={index} className="text-gray-700 leading-relaxed flex items-start gap-2">
-                        <span className="inline-block w-2 h-2 mt-2 rounded-full bg-indigo-400 flex-shrink-0" />
+                        <span className="inline-block w-2 h-2 mt-2 rounded-full bg-forest-400 flex-shrink-0" />
                         <span dangerouslySetInnerHTML={{ __html: parseBoldText(point) }} />
                       </li>
                     ))}
@@ -261,7 +261,7 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
                   <ol className="space-y-3 ml-1 list-none">
                     {numberedItems.map((item, index) => (
                       <li key={index} className="text-gray-700 leading-relaxed flex items-start gap-2">
-                        <span className="inline-flex items-center justify-center w-5 h-5 mt-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex-shrink-0">{index + 1}</span>
+                        <span className="inline-flex items-center justify-center w-5 h-5 mt-0.5 rounded-full bg-forest-100 text-forest-700 text-xs font-bold flex-shrink-0">{index + 1}</span>
                         <span dangerouslySetInnerHTML={{ __html: parseBoldText(item) }} />
                       </li>
                     ))}
@@ -289,8 +289,8 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
 
   const parseBoldText = (text: string) => {
     return text
-      .replace(/\*\*(.*?)\*\*/g, '<strong class="text-indigo-900 font-semibold">$1</strong>')
-      .replace(/__(.*?)__/g, '<span class="underline decoration-indigo-300 decoration-2 underline-offset-2">$1</span>');
+      .replace(/\*\*(.*?)\*\*/g, '<strong class="text-forest-900 font-semibold">$1</strong>')
+      .replace(/__(.*?)__/g, '<span class="underline decoration-forest-300 decoration-2 underline-offset-2">$1</span>');
   };
 
   const loadTeachingContent = async () => {
@@ -437,7 +437,7 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
                 setHasStarted(false);
                 setShowSetup(true);
               }} 
-              className="bg-indigo-500 hover:bg-indigo-600"
+              className="bg-forest-600 hover:bg-forest-700"
             >
               Try Again
             </Button>
@@ -468,14 +468,14 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
       )}
 
       {/* Content Display */}
-      <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50">
+      <Card className="border-2 border-forest-200 bg-gradient-to-br from-forest-50 to-green-50">
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
-              <BookOpen className="w-5 h-5 text-indigo-600" />
+            <div className="w-10 h-10 bg-forest-100 rounded-full flex items-center justify-center">
+              <BookOpen className="w-5 h-5 text-forest-600" />
             </div>
             <div>
-              <CardTitle className="text-xl text-indigo-900">
+              <CardTitle className="text-xl text-forest-900">
                 Arlo Teaching
               </CardTitle>
             </div>
@@ -484,7 +484,7 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
         <CardContent className="space-y-6">
           <div className="bg-white/60 rounded-lg p-6">
             {currentLesson.title && (
-              <h2 className="text-lg font-bold text-indigo-900 mb-4 pb-2 border-b border-indigo-100">
+              <h2 className="text-lg font-bold text-forest-900 mb-4 pb-2 border-b border-forest-100">
                 {currentLesson.title}
               </h2>
             )}
@@ -512,7 +512,7 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
             {(isLastContent && isLastTechniqueOfSession) ? (
               <Button
                 onClick={handleNext}
-                className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600"
+                className="flex items-center gap-2 bg-forest-600 hover:bg-forest-700"
               >
                 <Play className="w-4 h-4" />
                 Start {techniqueName}
@@ -520,7 +520,7 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
             ) : !isLastContent ? (
               <Button
                 onClick={handleNext}
-                className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600"
+                className="flex items-center gap-2 bg-forest-600 hover:bg-forest-700"
               >
                 Next
                 <ChevronRight className="w-4 h-4" />

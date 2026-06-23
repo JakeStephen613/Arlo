@@ -103,7 +103,7 @@ export default function Index() {
 
       {/* CTA */}
       <button
-        onClick={() => navigate('/session')}
+        onClick={() => navigate('/session', b.current_focus ? { state: { prefillTopic: b.current_focus } } : undefined)}
         className="w-full flex items-center justify-between rounded-xl bg-forest-700 dark:bg-forest-600 p-6 transition-all hover:bg-forest-600 dark:hover:bg-forest-500 hover:shadow-card group"
       >
         <div className="text-left">
