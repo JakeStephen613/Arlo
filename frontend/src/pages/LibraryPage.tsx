@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Library, Clock, BookOpen, Calendar } from 'lucide-react';
+import { Library, Clock, BookOpen, Calendar, Pause, Play } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { Badge } from '@/components/ui/badge';
 
 interface SessionRecord {
   id: string;
   topic: string;
   duration_minutes: number;
   timestamp: string;
+  status: 'completed' | 'paused';
 }
 
 export default function LibraryPage() {
@@ -19,16 +21,48 @@ export default function LibraryPage() {
 
   useEffect(() => {
     if (!user) return;
-    supabase
-      .from('study_session_data')
-      .select('id, topic, duration_minutes, timestamp')
-      .eq('user_id', user.id)
-      .order('timestamp', { ascending: false })
-      .then(({ data }) => {
-        setSessions((data as SessionRecord[]) || []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+
+    const loadSessions = async () => {
+      const allSessions: SessionRecord[] = [];
+
+      // Fetch completed sessions
+      const { data: completed } = await supabase
+        .from('study_session_data')
+        .select('id, topic, duration_minutes, timestamp')
+        .eq('user_id', user.id)
+        .order('timestamp', { ascending: false });
+
+      if (completed) {
+        allSessions.push(...completed.map((s: any) => ({
+          ...s,
+          status: 'completed' as const,
+        })));
+      }
+
+      // Fetch paused sessions
+      const { data: paused } = await supabase
+        .from('paused_sessions')
+        .select('id, title, session_plan, paused_at')
+        .eq('user_id', user.id)
+        .order('paused_at', { ascending: false });
+
+      if (paused) {
+        allSessions.push(...paused.map((s: any) => ({
+          id: s.id,
+          topic: s.title || (s.session_plan as any)?.topic || 'Untitled',
+          duration_minutes: (s.session_plan as any)?.total_duration || 0,
+          timestamp: s.paused_at,
+          status: 'paused' as const,
+        })));
+      }
+
+      // Sort by timestamp descending
+      allSessions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setSessions(allSessions);
+      setLoading(false);
+    };
+
+    loadSessions().catch(() => setLoading(false));
   }, [user]);
 
   if (loading) {
@@ -77,24 +111,46 @@ export default function LibraryPage() {
             <div
               key={s.id}
               className="rounded-lg border bg-card p-4 flex items-center gap-4 hover:bg-secondary/30 transition-colors cursor-pointer"
-              onClick={() => navigate('/session', { state: { prefillTopic: s.topic } })}
+              onClick={() => {
+                if (s.status === 'paused') {
+                  navigate('/session', { state: { resumeSessionId: s.id } });
+                } else {
+                  navigate('/session', { state: { prefillTopic: s.topic } });
+                }
+              }}
             >
               <div className="rounded-md bg-primary/10 p-2.5">
-                <BookOpen className="w-5 h-5 text-primary" />
+                {s.status === 'paused' ? (
+                  <Pause className="w-5 h-5 text-accent" />
+                ) : (
+                  <BookOpen className="w-5 h-5 text-primary" />
+                )}
               </div>
               <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-foreground">{s.topic}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-foreground">{s.topic}</span>
+                  {s.status === 'paused' && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">paused</Badge>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 mt-1">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Clock className="w-3 h-3" />
-                    {s.duration_minutes} min
-                  </span>
+                  {s.duration_minutes > 0 && (
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="w-3 h-3" />
+                      {s.duration_minutes} min
+                    </span>
+                  )}
                   <span className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Calendar className="w-3 h-3" />
                     {formatDate(s.timestamp)}
                   </span>
                 </div>
               </div>
+              {s.status === 'paused' && (
+                <button className="text-xs text-primary font-medium flex items-center gap-1 hover:underline">
+                  <Play className="w-3 h-3" /> Resume
+                </button>
+              )}
             </div>
           ))}
         </div>

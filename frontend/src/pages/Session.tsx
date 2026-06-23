@@ -903,7 +903,8 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
                 }));
                 setCheckQuestions(checks);
                 const cleaned = fullText.replace(/\[CHECK\].*?\[\/CHECK\]/gs, '');
-                const finalSections = cleaned.split(/\n\n+/).map(s => s.trim()).filter(Boolean);
+                const rawSections = cleaned.split(/\n\n+/).map(s => s.trim()).filter(Boolean);
+                const finalSections = mergeTitleSections(rawSections);
                 setSections(finalSections);
                 setCurrentSection('');
                 setStreaming(false);
@@ -1071,9 +1072,7 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
                     <span className="text-xs text-muted-foreground">{i + 1} of {sections.length}</span>
                   )}
                 </div>
-                <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
-                  {formatTeachingText(section)}
-                </div>
+                <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]" dangerouslySetInnerHTML={{ __html: formatTeachingText(section) }} />
               </div>
               {!streaming && checkQuestions.map((cq, ci) => cq.afterSection === i ? renderCheck(ci) : null)}
             </div>
@@ -1087,9 +1086,7 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
                 </div>
                 <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
               </div>
-              <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]">
-                {formatTeachingText(currentSection)}
-              </div>
+              <div className="text-foreground leading-relaxed whitespace-pre-wrap text-[15px]" dangerouslySetInnerHTML={{ __html: formatTeachingText(currentSection) }} />
             </div>
           )}
 
@@ -1138,12 +1135,28 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
   );
 }
 
+function mergeTitleSections(sections: string[]): string[] {
+  const merged: string[] = [];
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i];
+    const isShort = s.length < 60 && !s.includes('\n') && !s.startsWith('- ') && !s.startsWith('* ');
+    if (isShort && i + 1 < sections.length) {
+      merged.push(s + '\n\n' + sections[i + 1]);
+      i++;
+    } else {
+      merged.push(s);
+    }
+  }
+  return merged;
+}
+
 function formatTeachingText(text: string): string {
   return text
-    .replace(/^#{1,3}\s+/gm, '')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/^#{1,3}\s+(.+)/gm, '<strong class="text-lg block mb-1">$1</strong>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.*?)`/g, '$1')
+    .replace(/^[*-] (.+)/gm, '<span class="flex items-start gap-2 my-1"><span class="inline-block w-1.5 h-1.5 mt-2 rounded-full bg-forest-400 flex-shrink-0"></span><span>$1</span></span>')
+    .replace(/^\d+\.\s(.+)/gm, '<span class="flex items-start gap-2 my-1"><span class="text-forest-600 font-bold">•</span><span>$1</span></span>')
     .trim();
 }
 
