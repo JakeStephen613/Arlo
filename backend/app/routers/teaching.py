@@ -103,11 +103,14 @@ FORMATTING RULES (STRICT - FOLLOW EXACTLY):
 - Each section should be 60-100 words. Keep it SHORT and punchy.
 
 STRUCTURE:
-- Write exactly 4-5 sections, each covering one key idea.
-- Be concise. The student should be able to read the entire lesson in 2-3 minutes.
-- After section 2, insert: [CHECK] a recall question about what was just taught [/CHECK]
-- After section 4, insert: [CHECK] a second recall question [/CHECK]
+- Write exactly 6-12 sections total, each covering one key idea. NEVER exceed 12 sections.
+- Each section should be a substantial chunk (3-5 sentences minimum). Do NOT split individual sentences or bullet points into separate sections.
+- Keep related sub-points together in the same section. A section with a heading + its bullet points = ONE section, not many.
+- Be concise. The student should be able to read the entire lesson in 3-5 minutes.
+- After section 3, insert: [CHECK] a recall question about what was just taught [/CHECK]
+- After section 5 or 6, insert: [CHECK] a second recall question [/CHECK]
 - End with a brief "Key Takeaways" section (3 bullet points max).
+- NEVER create empty sections or sections with just "---" or whitespace.
 
 EXAMPLES OF GOOD TEACHING STYLE:
 
@@ -218,7 +221,10 @@ async def get_combined_content(request: Request, req: TeachingRequest):
     messages = [
         {"role": "system", "content": TEACHING_SYSTEM + briefing_ctx
          + "\n\nReturn a JSON object: {\"lesson\": [{\"title\": \"...\", \"content\": \"...\"}]}. "
-         + "Output 8-14 blocks. Return ONLY valid JSON."},
+         + "Output EXACTLY 6-12 blocks total. Each block must be a meaningful chunk of content (at least 3-4 sentences). "
+         + "NEVER create empty blocks or blocks with only a title and no real content. "
+         + "Keep closely related sub-points together in ONE block instead of splitting each bullet or sentence into its own block. "
+         + "A [CHECK] question counts as one block. Return ONLY valid JSON."},
         {
             "role": "user",
             "content": f"Create a comprehensive lesson about: {req.topic}"
