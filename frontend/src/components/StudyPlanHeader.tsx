@@ -72,7 +72,7 @@ const StudyPlanHeader = ({ plan, onBack, onSave, onStartSession, hasUnsavedChang
               <div className="text-muted-foreground">Blocks</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-primary">{plan.total_duration}</div>
+              <div className="text-2xl font-bold text-primary">{plan.total_duration || plan.blocks?.reduce((sum, b) => sum + (b.duration || 0), 0) || 0}</div>
               <div className="text-muted-foreground">Minutes</div>
             </div>
             <div className="text-center">

@@ -51,10 +51,6 @@ const StudyPlanEditor = ({ plan, onSavePlan, onStartSession, onBack }: StudyPlan
   };
 
   const handleStartSession = () => {
-    if (hasUnsavedChanges) {
-      setShowUnsavedWarning(true);
-      return;
-    }
     onStartSession(editingPlan);
   };
 

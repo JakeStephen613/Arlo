@@ -19,8 +19,9 @@ const VALID_TECHNIQUES = {
  * Gets the total duration for a study block (handles both legacy and multi-technique blocks)
  */
 export const getBlockDuration = (block: StudyBlock): number => {
-  if (block.techniques && block.techniques.length > 0) {
-    return block.techniques.reduce((total, step) => total + step.duration, 0);
+  if (block.techniques && block.techniques.length > 0 && typeof block.techniques[0] === 'object' && 'duration' in block.techniques[0]) {
+    const total = block.techniques.reduce((sum, step) => sum + (step.duration || 0), 0);
+    return total || block.duration;
   }
   return block.duration;
 };
