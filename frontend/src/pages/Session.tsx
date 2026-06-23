@@ -888,7 +888,7 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
               if (evt.type === 'token') {
                 fullText += evt.content;
                 const cleaned = fullText.replace(/\[CHECK\].*?\[\/CHECK\]/gs, '|||CHECK|||');
-                const parts = cleaned.split(/\n\n+/).filter(p => p.trim() && p.trim() !== '|||CHECK|||');
+                const parts = cleaned.split(/\n---\n/).filter(p => p.trim() && p.trim() !== '|||CHECK|||');
                 const sectionTexts = parts.map(p => p.replace(/\|\|\|CHECK\|\|\|/g, '').trim()).filter(Boolean);
                 if (sectionTexts.length > 1) {
                   setSections(sectionTexts.slice(0, -1));
@@ -903,8 +903,8 @@ function TeachingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
                 }));
                 setCheckQuestions(checks);
                 const cleaned = fullText.replace(/\[CHECK\].*?\[\/CHECK\]/gs, '');
-                const rawSections = cleaned.split(/\n\n+/).map(s => s.trim()).filter(Boolean);
-                const finalSections = mergeTitleSections(rawSections);
+                const rawSections = cleaned.split(/\n---\n/).map(s => s.trim()).filter(Boolean);
+                const finalSections = rawSections.length > 1 ? rawSections : mergeTitleSections(cleaned.split(/\n\n+/).map(s => s.trim()).filter(Boolean));
                 setSections(finalSections);
                 setCurrentSection('');
                 setStreaming(false);

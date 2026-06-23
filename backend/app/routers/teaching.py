@@ -100,37 +100,48 @@ FORMATTING RULES (STRICT - FOLLOW EXACTLY):
 - Do NOT use ``` or backticks.
 - Use "- " or "* " for bullet points.
 - Use bullet points liberally to break up information — they are easier to scan than walls of text.
-- Each section should be 60-120 words. Keep it SHORT and punchy.
+- Each section should be 80-150 words. Keep it SHORT and punchy.
+
+SECTION SEPARATOR (CRITICAL):
+- Separate each section with exactly "---" on its own line.
+- Within a section, use single blank lines between paragraphs. The "---" is the ONLY way to mark a new section.
+- A section title and its content MUST be in the SAME section (no "---" between a title and its paragraphs).
 
 STRUCTURE:
-- Write exactly 6-12 sections total, each covering one key idea. NEVER exceed 12 sections.
-- Each section should be a substantial chunk (3-5 sentences minimum). Do NOT split individual sentences or bullet points into separate sections.
-- Keep related sub-points together in the same section. A section with a heading + its bullet points = ONE section, not many.
+- Write exactly 6-10 sections total. NEVER exceed 10 sections. Count them as you write.
+- Each section should contain a short title line followed by 3-5 sentences and/or bullet points. Keep everything for one idea in ONE section.
 - Be concise. The student should be able to read the entire lesson in 3-5 minutes.
 - After section 3, insert: [CHECK] a recall question about what was just taught [/CHECK]
-- After section 5 or 6, insert: [CHECK] a second recall question [/CHECK]
+- After section 6, insert: [CHECK] a second recall question [/CHECK]
 - End with a brief "Key Takeaways" section (3 bullet points max).
-- NEVER create empty sections or sections with just "---" or whitespace.
 
-EXAMPLES OF GOOD TEACHING STYLE:
+EXAMPLE OF CORRECT FORMAT (notice --- between sections, NOT between title and content):
 
-"A **cell** is the smallest living piece of life that can do all the important things like grow, use energy, react to surroundings, and reproduce.
+What is a Cell?
+
+A **cell** is the smallest living piece of life that can do all the important things like grow, use energy, react to surroundings, and reproduce.
 
 **Cell Theory** says:
 - All living things are made of cells
 - All cells come from other cells
 
-Think of cells like tiny factories — each one has specialized workers (**organelles**) doing specific jobs to keep the whole operation running."
+Think of cells like tiny factories — each one has specialized workers (**organelles**) doing specific jobs to keep the whole operation running.
 
-"**Economics** is the study of how people make choices about their limited resources.
+---
+
+Understanding Scarcity
+
+**Economics** is the study of how people make choices about their limited resources.
 
 Key ideas:
 - **Scarcity** — Resources (money, time, food) are limited. We can't have everything.
 - **Opportunity Cost** — Whenever you choose one thing, you give up the next best alternative.
 
-Example: If you spend $10 on lunch, that's $10 you can't spend on a movie ticket. That movie ticket is your **opportunity cost**."
+Example: If you spend $10 on lunch, that's $10 you can't spend on a movie ticket. That movie ticket is your **opportunity cost**.
 
-Now teach the requested topic using this exact style."""
+---
+
+Now teach the requested topic using this exact style and --- separators."""
 
 
 def _build_briefing_context(user_id: str) -> str:
