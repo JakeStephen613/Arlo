@@ -366,16 +366,30 @@ export default function Session() {
 
 // ── Block Expansion ──────────────────────────────────────────
 
+function getTechniqueNames(techniques: any[]): string[] {
+  if (!techniques || techniques.length === 0) return [];
+  return techniques.map(t => typeof t === 'string' ? t : t.technique).filter(Boolean);
+}
+
+function normalizeTechnique(tech: string): ExpandedSubBlock['mode'] | null {
+  const map: Record<string, ExpandedSubBlock['mode']> = {
+    quiz: 'quiz',
+    flashcard: 'flashcard',
+    flashcards: 'flashcard',
+    feynman: 'feynman',
+    blurting: 'blurting',
+  };
+  return map[tech.toLowerCase()] || null;
+}
+
 function expandBlocks(blocks: StudyBlock[]): ExpandedSubBlock[] {
   const expanded: ExpandedSubBlock[] = [];
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
-    // Teaching first
     expanded.push({ blockIndex: i, mode: 'teach', block });
-    // Then each technique
-    for (const tech of block.techniques) {
-      const mode = tech as ExpandedSubBlock['mode'];
-      if (['quiz', 'flashcard', 'feynman', 'blurting'].includes(mode)) {
+    for (const tech of getTechniqueNames(block.techniques)) {
+      const mode = normalizeTechnique(tech);
+      if (mode) {
         expanded.push({ blockIndex: i, mode, block });
       }
     }
@@ -539,7 +553,7 @@ function PlanReview({ plan, loading, topic, duration, onStart, onBack }: {
                   </div>
                 </div>
                 <div className="flex gap-1.5">
-                  {block.techniques.map(tech => {
+                  {getTechniqueNames(block.techniques).map(tech => {
                     const Icon = TECHNIQUE_ICONS[tech] || BookOpen;
                     return (
                       <span key={tech} className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
@@ -715,6 +729,17 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPau
                   <div className="w-4 h-4 rounded-full border border-muted-foreground/30 shrink-0" />
                 )}
                 <span className="truncate">{block.unit}</span>
+              </div>
+              <div className="flex gap-1 mt-1 ml-6">
+                {getTechniqueNames(block.techniques).map(tech => {
+                  const Icon = TECHNIQUE_ICONS[tech] || BookOpen;
+                  return (
+                    <span key={tech} className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                      <Icon className="w-2.5 h-2.5" />
+                      {tech}
+                    </span>
+                  );
+                })}
               </div>
             </div>
           );
