@@ -343,6 +343,7 @@ export default function Session() {
           scores={scores}
           onComplete={handleSubBlockComplete}
           onPause={pauseAndExit}
+          onSkipTo={(index: number) => setCurrentSubBlockIndex(index)}
         />
       )}
       {phase === 'summary' && plan && (
@@ -597,13 +598,14 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPause }: {
+function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPause, onSkipTo }: {
   plan: StudyPlan;
   subBlocks: ExpandedSubBlock[];
   currentIndex: number;
   scores: BlockScore[];
   onComplete: (score: number) => void;
   onPause: () => void;
+  onSkipTo: (index: number) => void;
 }) {
   const current = subBlocks[currentIndex];
   const currentBlockIndex = current.blockIndex;
@@ -693,8 +695,12 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPau
           return (
             <div
               key={block.id}
+              onClick={() => {
+                const targetSubIndex = subBlocks.findIndex(sb => sb.blockIndex === i);
+                if (targetSubIndex >= 0) onSkipTo(targetSubIndex);
+              }}
               className={cn(
-                'rounded-lg px-3 py-2.5 text-sm transition-all border',
+                'rounded-lg px-3 py-2.5 text-sm transition-all border cursor-pointer hover:bg-primary/10',
                 isCurrent && 'border-primary bg-primary/5 text-foreground font-medium',
                 isDone && !isCurrent && 'border-transparent bg-secondary/50 text-muted-foreground',
                 !isDone && !isCurrent && 'border-transparent text-muted-foreground'
@@ -747,6 +753,26 @@ function StudyingView({ plan, subBlocks, currentIndex, scores, onComplete, onPau
           <div className="py-[15vh]">
             <ModeView subBlock={current} onComplete={onComplete} />
           </div>
+        </div>
+
+        {/* Navigation controls */}
+        <div className="shrink-0 flex items-center justify-between pt-2 pb-1 border-t">
+          <button
+            onClick={() => { if (currentIndex > 0) onSkipTo(currentIndex - 1); }}
+            disabled={currentIndex === 0}
+            className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors flex items-center gap-1"
+          >
+            <ArrowRight className="w-3 h-3 rotate-180" /> Previous
+          </button>
+          <span className="text-xs text-muted-foreground">
+            {currentIndex + 1} / {subBlocks.length}
+          </span>
+          <button
+            onClick={() => onComplete(0)}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+          >
+            Skip <ArrowRight className="w-3 h-3" />
+          </button>
         </div>
       </div>
 
@@ -1486,7 +1512,7 @@ function FeynmanStep({ block, onComplete }: { block: StudyBlock; onComplete: (sc
             <span className="text-xs text-muted-foreground">{explanation.split(/\s+/).filter(Boolean).length} words</span>
             <button
               onClick={handleSubmit}
-              disabled={explanation.split(/\s+/).filter(Boolean).length < 10 || submitting}
+              disabled={explanation.split(/\s+/).filter(Boolean).length < 3 || submitting}
               className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
             >
               {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
