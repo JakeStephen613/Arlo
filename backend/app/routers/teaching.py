@@ -96,11 +96,11 @@ CRITICAL STYLE REQUIREMENTS:
 
 FORMATTING RULES (STRICT - FOLLOW EXACTLY):
 - Do NOT use markdown headers (no # or ##).
-- Do NOT use ** for bold. Instead, CAPITALIZE key terms or put them in quotes.
+- Use **bold** for key terms and important concepts (wrap in double asterisks).
 - Do NOT use ``` or backticks.
 - Use "- " or "* " for bullet points.
-- Start each new section with a clear section title on its own line, followed by a blank line.
-- Each section should be 60-100 words. Keep it SHORT and punchy.
+- Use bullet points liberally to break up information — they are easier to scan than walls of text.
+- Each section should be 60-120 words. Keep it SHORT and punchy.
 
 STRUCTURE:
 - Write exactly 6-12 sections total, each covering one key idea. NEVER exceed 12 sections.
@@ -114,21 +114,21 @@ STRUCTURE:
 
 EXAMPLES OF GOOD TEACHING STYLE:
 
-"A CELL is the smallest living piece of life that can do all the important things like grow, use energy, react to surroundings, and reproduce.
+"A **cell** is the smallest living piece of life that can do all the important things like grow, use energy, react to surroundings, and reproduce.
 
-Cell Theory says:
+**Cell Theory** says:
 - All living things are made of cells
 - All cells come from other cells
 
-Think of cells like tiny factories - each one has specialized workers (organelles) doing specific jobs to keep the whole operation running."
+Think of cells like tiny factories — each one has specialized workers (**organelles**) doing specific jobs to keep the whole operation running."
 
-"ECONOMICS is the study of how people make choices about their limited resources.
+"**Economics** is the study of how people make choices about their limited resources.
 
 Key ideas:
-- SCARCITY: Resources (money, time, food) are limited. We can't have everything.
-- OPPORTUNITY COST: Whenever you choose one thing, you give up the next best alternative.
+- **Scarcity** — Resources (money, time, food) are limited. We can't have everything.
+- **Opportunity Cost** — Whenever you choose one thing, you give up the next best alternative.
 
-Example: If you spend $10 on lunch, that's $10 you can't spend on a movie ticket. That movie ticket is your opportunity cost."
+Example: If you spend $10 on lunch, that's $10 you can't spend on a movie ticket. That movie ticket is your **opportunity cost**."
 
 Now teach the requested topic using this exact style."""
 
@@ -221,10 +221,12 @@ async def get_combined_content(request: Request, req: TeachingRequest):
     messages = [
         {"role": "system", "content": TEACHING_SYSTEM + briefing_ctx
          + "\n\nReturn a JSON object: {\"lesson\": [{\"title\": \"...\", \"content\": \"...\"}]}. "
-         + "Output EXACTLY 6-12 blocks total. Each block must be a meaningful chunk of content (at least 3-4 sentences). "
-         + "NEVER create empty blocks or blocks with only a title and no real content. "
-         + "Keep closely related sub-points together in ONE block instead of splitting each bullet or sentence into its own block. "
-         + "A [CHECK] question counts as one block. Return ONLY valid JSON."},
+         + "Output EXACTLY 6-12 blocks total. "
+         + "CRITICAL: Every block MUST have BOTH a short title (3-6 words) AND substantial content (at least 3-4 sentences or a paragraph with bullet points). "
+         + "The title is a heading label — the content is the actual teaching text. NEVER create a block where content is empty, just a title repeat, or just '---'. "
+         + "Keep closely related sub-points together in ONE block. "
+         + "A [CHECK] question counts as one block (title='Quick Check', content=the question text). "
+         + "Return ONLY valid JSON."},
         {
             "role": "user",
             "content": f"Create a comprehensive lesson about: {req.topic}"

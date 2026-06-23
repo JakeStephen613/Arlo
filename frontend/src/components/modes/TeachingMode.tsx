@@ -120,9 +120,10 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
                 
                 if (bulletPoints.length > 0) {
                   processedLines.push(
-                    <ul key={`bullets-${i}`} className="list-disc ml-6 space-y-2 my-3">
+                    <ul key={`bullets-${i}`} className="space-y-3 my-3 ml-1">
                       {bulletPoints.map((point, idx) => (
-                        <li key={idx} className="text-gray-700 leading-relaxed">
+                        <li key={idx} className="text-gray-700 leading-relaxed flex items-start gap-2">
+                          <span className="inline-block w-2 h-2 mt-2 rounded-full bg-indigo-400 flex-shrink-0" />
                           <span dangerouslySetInnerHTML={{ __html: parseBoldText(point) }} />
                         </li>
                       ))}
@@ -153,9 +154,10 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
                 
                 if (numberedItems.length > 0) {
                   processedLines.push(
-                    <ol key={`numbers-${i}`} className="list-decimal ml-6 space-y-2 my-3">
+                    <ol key={`numbers-${i}`} className="space-y-3 my-3 ml-1 list-none">
                       {numberedItems.map((item, idx) => (
-                        <li key={idx} className="text-gray-700 leading-relaxed">
+                        <li key={idx} className="text-gray-700 leading-relaxed flex items-start gap-2">
+                          <span className="inline-flex items-center justify-center w-5 h-5 mt-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex-shrink-0">{idx + 1}</span>
                           <span dangerouslySetInnerHTML={{ __html: parseBoldText(item) }} />
                         </li>
                       ))}
@@ -214,9 +216,10 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
                   </div>
                 )}
                 {bulletPoints.length > 0 && (
-                  <ul className="list-disc ml-6 space-y-2">
+                  <ul className="space-y-3 ml-1">
                     {bulletPoints.map((point, index) => (
-                      <li key={index} className="text-gray-700 leading-relaxed">
+                      <li key={index} className="text-gray-700 leading-relaxed flex items-start gap-2">
+                        <span className="inline-block w-2 h-2 mt-2 rounded-full bg-indigo-400 flex-shrink-0" />
                         <span dangerouslySetInnerHTML={{ __html: parseBoldText(point) }} />
                       </li>
                     ))}
@@ -255,9 +258,10 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
                   </div>
                 )}
                 {numberedItems.length > 0 && (
-                  <ol className="list-decimal ml-6 space-y-2">
+                  <ol className="space-y-3 ml-1 list-none">
                     {numberedItems.map((item, index) => (
-                      <li key={index} className="text-gray-700 leading-relaxed">
+                      <li key={index} className="text-gray-700 leading-relaxed flex items-start gap-2">
+                        <span className="inline-flex items-center justify-center w-5 h-5 mt-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex-shrink-0">{index + 1}</span>
                         <span dangerouslySetInnerHTML={{ __html: parseBoldText(item) }} />
                       </li>
                     ))}
@@ -283,9 +287,10 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
     );
   };
 
-  // Helper function to parse bold text (**text** -> <strong>text</strong>)
   const parseBoldText = (text: string) => {
-    return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '<strong class="text-indigo-900 font-semibold">$1</strong>')
+      .replace(/__(.*?)__/g, '<span class="underline decoration-indigo-300 decoration-2 underline-offset-2">$1</span>');
   };
 
   const loadTeachingContent = async () => {
@@ -319,7 +324,23 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
       }
 
       if (lessonData && lessonData.length > 0) {
-        setLessons(lessonData);
+        // Merge title-only blocks with the next block
+        const merged: TeachingLesson[] = [];
+        for (let i = 0; i < lessonData.length; i++) {
+          const lesson = lessonData[i];
+          const contentStr = Array.isArray(lesson.content) ? lesson.content.join('') : (lesson.content || '');
+          const isEmptyContent = !contentStr.trim() || contentStr.trim() === '---' || contentStr.trim() === lesson.title?.trim();
+
+          if (isEmptyContent && i + 1 < lessonData.length) {
+            // Merge this title into the next block
+            const next = lessonData[i + 1];
+            merged.push({ title: lesson.title || next.title, content: next.content });
+            i++; // skip next since we merged it
+          } else if (!isEmptyContent) {
+            merged.push(lesson);
+          }
+        }
+        setLessons(merged.length > 0 ? merged : lessonData);
       } else {
         onComplete();
       }
@@ -462,6 +483,11 @@ const TeachingMode = ({ description, onComplete, onBack, techniqueName, techniqu
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="bg-white/60 rounded-lg p-6">
+            {currentLesson.title && (
+              <h2 className="text-lg font-bold text-indigo-900 mb-4 pb-2 border-b border-indigo-100">
+                {currentLesson.title}
+              </h2>
+            )}
             <div className="text-gray-700 leading-relaxed">
               {parseContent(currentLesson.content)}
             </div>
