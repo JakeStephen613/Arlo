@@ -28,6 +28,7 @@ export const saveStudySessionData = async (sessionData: {
   quiz_mistakes?: unknown[];
   flashcards?: unknown[];
   user_id: string;
+  subject_id?: string | null;
 }) => {
   const { data, error } = await supabase
     .from('study_session_data')
@@ -39,7 +40,8 @@ export const saveStudySessionData = async (sessionData: {
       flashcards: sessionData.flashcards || [],
       user_id: sessionData.user_id,
       timestamp: new Date().toISOString(),
-    })
+      ...(sessionData.subject_id ? { subject_id: sessionData.subject_id } : {}),
+    } as any)
     .select()
     .single();
 

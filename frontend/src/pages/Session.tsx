@@ -486,16 +486,16 @@ function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfCo
         </div>
 
         {/* Main card */}
-        <div className="rounded-2xl border bg-card shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/40 transition-all">
+        <div className="rounded-2xl border bg-card shadow-sm transition-all focus-within:shadow-md">
 
-          {/* Topic input — no inner border, card is the container */}
+          {/* Topic input — borderless, card is the only container */}
           <div className="px-5 pt-5 pb-3">
             <textarea
               value={topic}
               onChange={e => setTopic(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && canSubmit) { e.preventDefault(); onSubmit(); } }}
               placeholder="Topic, subject, or paste notes..."
-              className="w-full bg-transparent text-foreground placeholder:text-muted-foreground/40 focus:outline-none text-base resize-none leading-relaxed"
+              className="w-full bg-transparent text-foreground placeholder:text-muted-foreground/40 border-0 outline-none ring-0 focus:border-0 focus:outline-none focus:ring-0 text-base resize-none leading-relaxed"
               rows={3}
               autoFocus
             />
@@ -1931,8 +1931,8 @@ function SummaryView({ plan, scores, subjectId, onHome, onAnother }: {
           topic: plan.topic,
           duration_minutes: plan.total_duration,
           user_id: session.user.id,
-          ...(subjectId ? { subject_id: subjectId } : {}),
-        } as any);
+          subject_id: subjectId ?? undefined,
+        });
 
         // Generate review sheet
         setReviewLoading(true);
