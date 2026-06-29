@@ -367,67 +367,101 @@ function ConceptCard({ concept, onStudy }: { concept: ConceptHistory; onStudy: (
 
 function StudyCalendar({ calendar }: { calendar: CalendarDay[] }) {
   const today = new Date();
+  const numWeeks = 16;
   const startDate = new Date(today);
-  startDate.setDate(startDate.getDate() - 83); // 12 weeks
-
-  const weeks: (CalendarDay | null)[][] = [];
-  let currentWeek: (CalendarDay | null)[] = [];
+  startDate.setDate(startDate.getDate() - (numWeeks * 7 - 1) - startDate.getDay());
 
   const calMap = new Map(calendar.map(d => [d.date, d]));
 
-  // Pad to start on Sunday
-  const startDow = startDate.getDay();
-  for (let i = 0; i < startDow; i++) currentWeek.push(null);
-
+  // Build columns (weeks), each with 7 rows (days Sun-Sat) — GitHub style
+  const weeks: (CalendarDay | null)[][] = [];
   const cursor = new Date(startDate);
-  while (cursor <= today) {
-    const key = cursor.toISOString().slice(0, 10);
-    currentWeek.push(calMap.get(key) || { date: key, sessions: 0, minutes: 0 });
-    if (currentWeek.length === 7) {
-      weeks.push(currentWeek);
-      currentWeek = [];
+  for (let w = 0; w < numWeeks; w++) {
+    const week: (CalendarDay | null)[] = [];
+    for (let d = 0; d < 7; d++) {
+      if (cursor > today) {
+        week.push(null);
+      } else {
+        const key = cursor.toISOString().slice(0, 10);
+        week.push(calMap.get(key) || { date: key, sessions: 0, minutes: 0 });
+      }
+      cursor.setDate(cursor.getDate() + 1);
     }
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  if (currentWeek.length > 0) {
-    while (currentWeek.length < 7) currentWeek.push(null);
-    weeks.push(currentWeek);
+    weeks.push(week);
   }
 
   const maxMins = Math.max(...calendar.map(d => d.minutes), 1);
+  const todayKey = today.toISOString().slice(0, 10);
+
+  const dayLabels = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
+
+  // Month labels
+  const monthLabels: { label: string; col: number }[] = [];
+  let lastMonth = -1;
+  for (let w = 0; w < weeks.length; w++) {
+    const firstDay = weeks[w].find(d => d !== null);
+    if (firstDay) {
+      const month = new Date(firstDay.date).getMonth();
+      if (month !== lastMonth) {
+        monthLabels.push({ label: new Date(firstDay.date).toLocaleDateString('en-US', { month: 'short' }), col: w });
+        lastMonth = month;
+      }
+    }
+  }
+
+  const totalStudyDays = calendar.filter(d => d.sessions > 0).length;
+  const totalMinutes = calendar.reduce((sum, d) => sum + d.minutes, 0);
 
   return (
     <div className="rounded-lg border bg-card p-5">
-      <h3 className="text-sm font-medium text-foreground mb-4">Study calendar</h3>
-
-      <div className="flex gap-1">
-        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
-          <div key={i} className="w-4 text-center text-[9px] text-muted-foreground mb-1">{d}</div>
-        ))}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-medium text-foreground">Study calendar</h3>
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <span><span className="font-medium text-foreground">{totalStudyDays}</span> days studied</span>
+          <span><span className="font-medium text-foreground">{totalMinutes >= 60 ? `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m` : `${totalMinutes}m`}</span> total</span>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-1">
-        {weeks.map((week, wi) => (
-          <div key={wi} className="flex gap-1">
-            {week.map((day, di) => {
-              if (!day) return <div key={di} className="w-4 h-4" />;
-              const intensity = day.minutes > 0 ? Math.max(0.15, day.minutes / maxMins) : 0;
-              const isToday = day.date === today.toISOString().slice(0, 10);
-              return (
-                <div
-                  key={di}
-                  className={cn(
-                    'w-4 h-4 rounded-sm transition-colors',
-                    isToday && 'ring-1 ring-primary',
-                    day.sessions === 0 && 'bg-secondary',
-                  )}
-                  style={day.sessions > 0 ? { backgroundColor: `rgb(34 197 94 / ${intensity})` } : undefined}
-                  title={`${day.date}: ${day.sessions} session${day.sessions !== 1 ? 's' : ''}, ${day.minutes}m`}
-                />
-              );
-            })}
-          </div>
-        ))}
+      <div className="overflow-x-auto">
+        <div className="inline-grid" style={{ gridTemplateColumns: `24px repeat(${numWeeks}, 1fr)`, gap: '3px' }}>
+          {/* Month labels row */}
+          <div />
+          {weeks.map((_, wi) => {
+            const ml = monthLabels.find(m => m.col === wi);
+            return (
+              <div key={wi} className="text-[10px] text-muted-foreground h-4 flex items-end">
+                {ml ? ml.label : ''}
+              </div>
+            );
+          })}
+
+          {/* Day rows */}
+          {[0, 1, 2, 3, 4, 5, 6].map(dayIdx => (
+            <>
+              <div key={`label-${dayIdx}`} className="text-[10px] text-muted-foreground flex items-center justify-end pr-1 h-[14px]">
+                {dayLabels[dayIdx]}
+              </div>
+              {weeks.map((week, wi) => {
+                const day = week[dayIdx];
+                if (!day) return <div key={`${wi}-${dayIdx}`} className="h-[14px] rounded-sm" />;
+                const intensity = day.minutes > 0 ? Math.max(0.2, day.minutes / maxMins) : 0;
+                const isToday = day.date === todayKey;
+                return (
+                  <div
+                    key={`${wi}-${dayIdx}`}
+                    className={cn(
+                      'h-[14px] rounded-sm transition-colors',
+                      isToday && 'ring-1 ring-primary ring-offset-1 ring-offset-card',
+                      day.sessions === 0 && 'bg-secondary/60',
+                    )}
+                    style={day.sessions > 0 ? { backgroundColor: `rgb(34 197 94 / ${intensity})` } : undefined}
+                    title={`${new Date(day.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}: ${day.sessions} session${day.sessions !== 1 ? 's' : ''}, ${day.minutes}m`}
+                  />
+                );
+              })}
+            </>
+          ))}
+        </div>
       </div>
 
       <div className="flex items-center gap-2 mt-3 text-[10px] text-muted-foreground">
@@ -436,7 +470,7 @@ function StudyCalendar({ calendar }: { calendar: CalendarDay[] }) {
           <div
             key={i}
             className="w-3 h-3 rounded-sm"
-            style={{ backgroundColor: v === 0 ? 'var(--secondary)' : `rgb(34 197 94 / ${v})` }}
+            style={{ backgroundColor: v === 0 ? 'hsl(var(--secondary))' : `rgb(34 197 94 / ${v})` }}
           />
         ))}
         <span>More</span>
