@@ -194,6 +194,7 @@ def submit_step(
     _apply_adaptive_rules(plan, step, score)
 
     plan.current_step += 1
+    _sync_plan_to_db(plan)
 
     if plan.current_step >= len(plan.steps):
         return _finish_session(plan)
@@ -411,7 +412,52 @@ def _raise_difficulty(current: str) -> str:
 
 
 def _get_plan(session_id: str) -> Optional[SessionPlan]:
-    return _active_sessions.get(session_id)
+    plan = _active_sessions.get(session_id)
+    if plan:
+        return plan
+    # Fall back to Postgres
+    return _load_plan_from_db(session_id)
+
+
+def _load_plan_from_db(session_id: str) -> Optional[SessionPlan]:
+    """Reload a session plan from Postgres into memory."""
+    try:
+        from app.services.context import get_supabase
+        supabase = get_supabase()
+        result = supabase.table("sessions").select("*").eq("id", session_id).maybeSingle().execute()
+        if not result.data or result.data.get("ended_at"):
+            return None
+        row = result.data
+        plan_data = row.get("plan") or {}
+        steps_raw = plan_data.get("steps", [])
+        steps = []
+        for s in steps_raw:
+            steps.append(SessionStep(
+                step_number=s.get("step_number", 0),
+                mode=StepMode(s["mode"]),
+                concept_id=UUID(s["concept_id"]),
+                concept_name=s.get("concept_name", ""),
+                difficulty=s.get("difficulty", "medium"),
+                rationale=s.get("rationale", ""),
+                completed=s.get("completed", False),
+                score=s.get("score"),
+                confidence_before=s.get("confidence_before"),
+                confidence_after=s.get("confidence_after"),
+            ))
+        current_step = sum(1 for s in steps if s.completed)
+        plan = SessionPlan(
+            session_id=UUID(session_id),
+            user_id=UUID(row["user_id"]),
+            intent=SessionIntent(row["intent"]),
+            steps=steps,
+            current_step=current_step,
+            started_at=datetime.fromisoformat(row["started_at"]) if row.get("started_at") else datetime.now(timezone.utc),
+        )
+        _active_sessions[session_id] = plan
+        return plan
+    except Exception as e:
+        logger.error("Failed to load session from DB: %s", e)
+        return None
 
 
 def _persist_session(plan: SessionPlan) -> None:
@@ -420,7 +466,7 @@ def _persist_session(plan: SessionPlan) -> None:
         from app.services.context import get_supabase
         supabase = get_supabase()
         plan_json = json.loads(json.dumps(
-            {"steps": [s.dict() for s in plan.steps]},
+            {"steps": [s.dict() for s in plan.steps], "current_step": plan.current_step},
             default=str,
         ))
         supabase.table("sessions").insert({
@@ -432,6 +478,22 @@ def _persist_session(plan: SessionPlan) -> None:
         }).execute()
     except Exception as e:
         logger.error("Failed to persist session: %s", e)
+
+
+def _sync_plan_to_db(plan: SessionPlan) -> None:
+    """Update the session plan in Postgres after step changes."""
+    try:
+        from app.services.context import get_supabase
+        supabase = get_supabase()
+        plan_json = json.loads(json.dumps(
+            {"steps": [s.dict() for s in plan.steps], "current_step": plan.current_step},
+            default=str,
+        ))
+        supabase.table("sessions").update({
+            "plan": plan_json,
+        }).eq("id", str(plan.session_id)).execute()
+    except Exception as e:
+        logger.error("Failed to sync session to DB: %s", e)
 
 
 def _finish_session(plan: SessionPlan) -> NextStepResponse:

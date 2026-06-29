@@ -39,6 +39,23 @@ export const apiGet = async <T>(path: string): Promise<T> => {
   return res.json();
 };
 
+export const apiPut = async <T>(path: string, body: unknown): Promise<T> => {
+  const headers = await getHeaders();
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+};
+
+export const apiDelete = async (path: string): Promise<void> => {
+  const headers = await getHeaders();
+  const res = await fetch(`${BASE}${path}`, { method: 'DELETE', headers });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+};
+
 export const apiPostAnon = async <T>(path: string, body: unknown): Promise<T> => {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',

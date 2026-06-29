@@ -24,7 +24,7 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { apiPost, apiGet } from '@/lib/apiClient';
+import { apiPost, apiGet, apiPut, apiDelete } from '@/lib/apiClient';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import StudyPlanEditor from '@/components/StudyPlanEditor';
@@ -125,9 +125,7 @@ const INTENT_OPTIONS: { value: SessionIntent; label: string; sub: string; icon: 
 
 // ── Main Component ───────────────────────────────────────────
 
-const SESSION_STORAGE_KEY = 'arlo-session-state';
-
-function saveSessionState(state: {
+type SessionStatePayload = {
   phase: SessionPhase;
   topic: string;
   duration: number;
@@ -135,32 +133,29 @@ function saveSessionState(state: {
   subBlocks: ExpandedSubBlock[];
   currentSubBlockIndex: number;
   scores: BlockScore[];
-}) {
-  try {
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state));
-  } catch {}
+};
+
+let _saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function saveSessionState(state: SessionStatePayload) {
+  if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
+  _saveDebounceTimer = setTimeout(() => {
+    apiPut('/session-state', { state }).catch(() => {});
+  }, 1500);
 }
 
-function loadSessionState(): {
-  phase: SessionPhase;
-  topic: string;
-  duration: number;
-  plan: StudyPlan | null;
-  subBlocks: ExpandedSubBlock[];
-  currentSubBlockIndex: number;
-  scores: BlockScore[];
-} | null {
+async function loadSessionState(): Promise<SessionStatePayload | null> {
   try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
+    const res = await apiGet<{ state: SessionStatePayload | null }>('/session-state');
+    return res.state ?? null;
   } catch {
     return null;
   }
 }
 
 function clearSessionState() {
-  localStorage.removeItem(SESSION_STORAGE_KEY);
+  if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
+  apiDelete('/session-state').catch(() => {});
 }
 
 export default function Session() {
@@ -170,21 +165,20 @@ export default function Session() {
   const resumeSessionId = (location.state as any)?.resumeSessionId || null;
   const locationSubjectId = (location.state as any)?.subjectId || null;
   const locationSubjectName = (location.state as any)?.subjectName || null;
+  const startReview = (location.state as any)?.startReview || false;
 
-  // Try to restore a saved session
-  const savedState = useRef(loadSessionState());
-
-  const [phase, setPhase] = useState<SessionPhase>(savedState.current?.phase || 'input');
-  const [topic, setTopic] = useState(savedState.current?.topic || prefillTopic);
-  const [duration, setDuration] = useState(savedState.current?.duration || 60);
+  const [phase, setPhase] = useState<SessionPhase>('input');
+  const [topic, setTopic] = useState(prefillTopic);
+  const [duration, setDuration] = useState(60);
   const [pdfContent, setPdfContent] = useState<string | null>(null);
-  const [plan, setPlan] = useState<StudyPlan | null>(savedState.current?.plan || null);
+  const [plan, setPlan] = useState<StudyPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Studying state
-  const [subBlocks, setSubBlocks] = useState<ExpandedSubBlock[]>(savedState.current?.subBlocks || []);
-  const [currentSubBlockIndex, setCurrentSubBlockIndex] = useState(savedState.current?.currentSubBlockIndex || 0);
-  const [scores, setScores] = useState<BlockScore[]>(savedState.current?.scores || []);
+  const [subBlocks, setSubBlocks] = useState<ExpandedSubBlock[]>([]);
+  const [currentSubBlockIndex, setCurrentSubBlockIndex] = useState(0);
+  const [scores, setScores] = useState<BlockScore[]>([]);
+  const [restoringState, setRestoringState] = useState(true);
   const [preloadedContent, setPreloadedContent] = useState<Record<string, boolean>>({});
 
   const [planLoading, setPlanLoading] = useState(false);
@@ -239,9 +233,56 @@ export default function Session() {
     }
   }, [phase, topic, duration, plan, subBlocks, currentSubBlockIndex, scores]);
 
-  const [showResumePrompt, setShowResumePrompt] = useState(
-    () => savedState.current?.phase === 'studying' && !!savedState.current?.plan
-  );
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+
+  // Restore session state from server on mount
+  useEffect(() => {
+    if (resumeSessionId) { setRestoringState(false); return; }
+    loadSessionState().then(saved => {
+      if (saved?.phase === 'studying' && saved.plan) {
+        setPhase(saved.phase);
+        setTopic(saved.topic || prefillTopic);
+        setDuration(saved.duration || 60);
+        setPlan(saved.plan);
+        setSubBlocks(saved.subBlocks || []);
+        setCurrentSubBlockIndex(saved.currentSubBlockIndex || 0);
+        setScores(saved.scores || []);
+        setShowResumePrompt(true);
+      }
+      setRestoringState(false);
+    });
+  }, []);
+
+  // Auto-start review session from dashboard
+  const startReviewRef = useRef(startReview);
+  useEffect(() => {
+    if (!startReviewRef.current || restoringState) return;
+    startReviewRef.current = false;
+    setUseAdaptive(true);
+    setSessionIntent('quick_review');
+    setTopic('Daily Review');
+    setTimeout(() => {
+      // Trigger adaptive session start
+      (async () => {
+        setPlanLoading(true);
+        setPhase('plan-review');
+        try {
+          const result = await apiPost<AdaptiveSession>('/orchestrator/session', {
+            intent: 'quick_review',
+            topic: 'Daily Review',
+          }, 30000);
+          setAdaptiveSession(result);
+          setAdaptiveStepIndex(0);
+          setPhase('studying');
+        } catch (e: any) {
+          setError(e.message || 'Failed to start review');
+          setPhase('input');
+        } finally {
+          setPlanLoading(false);
+        }
+      })();
+    }, 100);
+  }, [restoringState]);
 
   const discardSaved = () => {
     clearSessionState();
@@ -412,6 +453,14 @@ export default function Session() {
             </button>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (restoringState) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground text-sm">Loading session...</div>
       </div>
     );
   }
@@ -2047,6 +2096,133 @@ function BlurtingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
   );
 }
 
+// ── Diagnose Step (lightweight quiz) ────────────────────────
+
+function DiagnoseStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
+  interface QuizQ { question: string; options: string[]; correct_answer: string; explanation: string }
+  const [questions, setQuestions] = useState<QuizQ[]>([]);
+  const [currentQ, setCurrentQ] = useState(0);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [scores, setScores] = useState<number[]>([]);
+
+  const loadQuiz = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiPost<any>('/quiz/generate', {
+        content: `Diagnostic check: assess current understanding of ${block.unit}`,
+        difficulty: 'medium',
+        concept_name: block.unit,
+        max_questions: 2,
+      }, 45000);
+      if (res.questions?.length) {
+        setQuestions(res.questions.slice(0, 2));
+      } else {
+        onComplete(0.2);
+      }
+    } catch {
+      setError('Failed to generate diagnostic');
+    }
+    setLoading(false);
+  }, [block.unit]);
+
+  useEffect(() => { loadQuiz(); }, [loadQuiz]);
+
+  const handleReveal = () => {
+    setRevealed(true);
+    const isCorrect = selected === questions[currentQ].correct_answer;
+    setScores(prev => [...prev, isCorrect ? 1.0 : 0.0]);
+  };
+
+  const handleNext = () => {
+    if (currentQ + 1 < questions.length) {
+      setCurrentQ(prev => prev + 1);
+      setSelected(null);
+      setRevealed(false);
+    } else {
+      const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+      onComplete(avg);
+    }
+  };
+
+  if (loading) return <LoadingMode label="Diagnosing knowledge level..." />;
+
+  if (error) {
+    return (
+      <div className="max-w-lg mx-auto w-full text-center space-y-4 animate-fade-in">
+        <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
+        <p className="text-foreground font-semibold">{error}</p>
+        <button
+          onClick={loadQuiz}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          <RefreshCw className="w-4 h-4" /> Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!questions.length) return null;
+  const q = questions[currentQ];
+
+  return (
+    <div className="max-w-lg mx-auto w-full animate-fade-in space-y-5">
+      <div className="flex items-center gap-2 mb-2">
+        <Badge className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-0 text-xs">Diagnostic</Badge>
+        <span className="text-xs text-muted-foreground">Question {currentQ + 1} of {questions.length}</span>
+      </div>
+      <h3 className="text-lg font-semibold text-foreground leading-snug">{q.question}</h3>
+      <div className="space-y-2">
+        {q.options.map((opt, i) => {
+          const isCorrect = revealed && opt === q.correct_answer;
+          const isWrong = revealed && opt === selected && opt !== q.correct_answer;
+          return (
+            <button
+              key={i}
+              onClick={() => !revealed && setSelected(opt)}
+              className={cn(
+                'w-full text-left rounded-lg border px-4 py-3 text-sm transition-all',
+                !revealed && selected === opt && 'border-primary bg-primary/5 text-foreground',
+                !revealed && selected !== opt && 'border-border hover:border-primary/50 text-foreground',
+                isCorrect && 'border-green-500 bg-green-50 dark:bg-green-900/20 text-foreground',
+                isWrong && 'border-red-500 bg-red-50 dark:bg-red-900/20 text-foreground',
+                revealed && !isCorrect && !isWrong && 'opacity-50',
+              )}
+              disabled={revealed}
+            >
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+      {!revealed && selected && (
+        <button
+          onClick={handleReveal}
+          className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          Check
+        </button>
+      )}
+      {revealed && (
+        <div className="space-y-3">
+          <div className={cn('rounded-lg p-3 text-sm', scores[scores.length - 1] === 1 ? 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200')}>
+            {q.explanation}
+          </div>
+          <button
+            onClick={handleNext}
+            className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            {currentQ + 1 < questions.length ? 'Next' : 'Continue'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Generic Step (fallback) ─────────────────────────────────
 
 function GenericStep({ block, mode, onComplete }: { block: StudyBlock; mode: string; onComplete: (score: number) => void }) {
@@ -2415,9 +2591,21 @@ function AdaptiveModeView({ step, block, onComplete }: {
     case 'socratic':
       return <SocraticStep block={block} onComplete={onComplete} />;
     case 'diagnose':
-      return <QuizStep block={{ ...block, unit: `Diagnostic: ${block.unit}` }} onComplete={onComplete} />;
+      return <DiagnoseStep block={block} onComplete={onComplete} />;
     case 'review':
-      return <GenericStep block={block} mode="review" onComplete={onComplete} />;
+      return (
+        <div className="max-w-md mx-auto w-full text-center space-y-5 animate-fade-in">
+          <Trophy className="w-12 h-12 text-primary mx-auto" />
+          <h2 className="font-semibold text-foreground text-xl">Session Review</h2>
+          <p className="text-sm text-muted-foreground">Great work! You've completed this session's practice rounds. Ready to see your results?</p>
+          <button
+            onClick={() => onComplete(1.0)}
+            className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            See Summary
+          </button>
+        </div>
+      );
     default:
       return <GenericStep block={block} mode={step.mode} onComplete={onComplete} />;
   }

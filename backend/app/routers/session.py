@@ -122,6 +122,110 @@ async def due_reviews(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Active session state (server-side persistence) ─────────────
+
+
+@router.get("/session-state")
+async def get_session_state(request: Request):
+    """Load the user's active session state (replaces localStorage)."""
+    user_id = _get_user_id(request)
+    try:
+        from app.services.context import get_supabase
+        sb = get_supabase()
+        result = sb.table("active_session_state").select("session_data, updated_at").eq("user_id", user_id).maybeSingle().execute()
+        if result.data:
+            return {"state": result.data["session_data"], "updated_at": result.data["updated_at"]}
+        return {"state": None}
+    except Exception as e:
+        logger.exception("Failed to load session state")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/session-state")
+async def save_session_state(request: Request):
+    """Save (upsert) the user's active session state."""
+    user_id = _get_user_id(request)
+    body = await request.json()
+    session_data = body.get("state")
+    if session_data is None:
+        raise HTTPException(status_code=400, detail="Missing 'state' field")
+    try:
+        from app.services.context import get_supabase
+        sb = get_supabase()
+        now = datetime.now(timezone.utc).isoformat()
+        sb.table("active_session_state").upsert({
+            "user_id": user_id,
+            "session_data": session_data,
+            "updated_at": now,
+        }, on_conflict="user_id").execute()
+        return {"ok": True}
+    except Exception as e:
+        logger.exception("Failed to save session state")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/session-state")
+async def clear_session_state(request: Request):
+    """Clear the user's active session state."""
+    user_id = _get_user_id(request)
+    try:
+        from app.services.context import get_supabase
+        sb = get_supabase()
+        sb.table("active_session_state").delete().eq("user_id", user_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        logger.exception("Failed to clear session state")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Review session generation ──────────────────────────────────
+
+
+@router.post("/learner/start-review")
+async def start_review_session(request: Request):
+    """Generate a mixed-mode review session from due concepts."""
+    user_id = _get_user_id(request)
+    try:
+        from app.services.context import get_supabase
+        sb = get_supabase()
+        now = datetime.now(timezone.utc).isoformat()
+
+        result = sb.table("learner_concept_state").select(
+            "concept_id, mastery, streak, attempt_count, concepts(name, topic)"
+        ).eq("user_id", user_id).lte("next_review", now).order("next_review").limit(10).execute()
+
+        items = result.data or []
+        if not items:
+            return {"items": [], "message": "Nothing due for review right now!"}
+
+        review_items = []
+        for row in items:
+            cinfo = row.get("concepts") or {}
+            name = cinfo.get("name", "Unknown")
+            if name == "General Knowledge":
+                continue
+            mastery = row.get("mastery", 0)
+            if mastery < 0.4:
+                mode = "flashcard"
+            elif mastery < 0.7:
+                mode = "quiz"
+            else:
+                mode = "feynman"
+            review_items.append({
+                "concept_id": row["concept_id"],
+                "name": name,
+                "topic": cinfo.get("topic"),
+                "mastery": mastery,
+                "mode": mode,
+                "streak": row.get("streak", 0),
+            })
+
+        return {"items": review_items, "total": len(review_items)}
+    except Exception as e:
+        logger.exception("Failed to generate review session")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def _calc_trend(scores: list[float]) -> str:
     if len(scores) < 2:
         return "stable"
