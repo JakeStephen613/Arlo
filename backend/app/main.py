@@ -67,6 +67,8 @@ from app.services.context import router as context_router
 from app.routers.pdf_parser import router as pdf_parser_router
 from app.routers.teaching import router as teaching_router
 from app.routers.session import router as session_router
+from app.routers.orchestrator import router as orchestrator_router
+from app.routers.socratic import router as socratic_router
 
 # --- Include all routes ---
 app.include_router(flashcard_router, prefix="/api")
@@ -80,6 +82,8 @@ app.include_router(context_router, prefix="/api")
 app.include_router(pdf_parser_router, prefix="/api")
 app.include_router(teaching_router, prefix="/api")
 app.include_router(session_router, prefix="/api")
+app.include_router(orchestrator_router, prefix="/api")
+app.include_router(socratic_router, prefix="/api")
 
 @app.on_event("startup")
 async def on_startup():

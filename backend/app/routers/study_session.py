@@ -14,6 +14,7 @@ from app.services.llm import call_messages
 import httpx
 
 from app.core.config import CONTEXT_API_BASE
+from app.services.learner_context import get_tutor_briefing
 import logging
 
 logger = logging.getLogger(__name__)
@@ -364,7 +365,25 @@ async def generate_plan(request: Request, data: StudyPlanRequest):
     """Generate comprehensive study plan with appropriately-granular focused blocks."""
     try:
         user_id = extract_user_id(request)
+
+        # Inject learner context into the prompt if available
+        learner_context = ""
+        try:
+            briefing = get_tutor_briefing(user_id)
+            if briefing.weak_concepts:
+                weak_names = [c.name for c in briefing.weak_concepts[:5]]
+                learner_context = f"\n\nLEARNER CONTEXT: The student is weak on these concepts — give them extra attention if relevant to the topic: {', '.join(weak_names)}."
+                if briefing.due_reviews:
+                    due_names = [c.name for c in briefing.due_reviews[:5]]
+                    learner_context += f"\nConcepts due for review: {', '.join(due_names)}."
+                if briefing.average_mastery > 0:
+                    learner_context += f"\nOverall mastery: {round(briefing.average_mastery * 100)}%."
+        except Exception as e:
+            logger.warning("Failed to get learner briefing for session: %s", e)
+
         prompt = build_enhanced_prompt(data.objective, data.parsed_summary, data.duration)
+        if learner_context:
+            prompt += learner_context
         parsed = generate_gpt_plan(prompt, data.objective, data.parsed_summary, data.duration)
 
         session_id = f"session_{uuid.uuid4().hex[:8]}"

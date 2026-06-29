@@ -52,6 +52,7 @@ class StepMode(str, Enum):
     FLASHCARD = "flashcard"
     FEYNMAN = "feynman"
     BLURTING = "blurting"
+    SOCRATIC = "socratic"
     REVIEW = "review"
 
 
@@ -101,8 +102,8 @@ class NextStepResponse(BaseModel):
 
 INTENT_CONFIG = {
     SessionIntent.QUICK_REVIEW: {"max_steps": 6, "modes": [StepMode.QUIZ, StepMode.FLASHCARD], "teach": False},
-    SessionIntent.LEARN_NEW: {"max_steps": 8, "modes": [StepMode.TEACH, StepMode.QUIZ, StepMode.FEYNMAN], "teach": True},
-    SessionIntent.DEEP_SESSION: {"max_steps": 12, "modes": [StepMode.DIAGNOSE, StepMode.TEACH, StepMode.QUIZ, StepMode.FEYNMAN, StepMode.BLURTING, StepMode.REVIEW], "teach": True},
+    SessionIntent.LEARN_NEW: {"max_steps": 8, "modes": [StepMode.TEACH, StepMode.SOCRATIC, StepMode.QUIZ, StepMode.FEYNMAN], "teach": True},
+    SessionIntent.DEEP_SESSION: {"max_steps": 12, "modes": [StepMode.DIAGNOSE, StepMode.TEACH, StepMode.SOCRATIC, StepMode.QUIZ, StepMode.FEYNMAN, StepMode.BLURTING, StepMode.REVIEW], "teach": True},
     SessionIntent.EXAM_PREP: {"max_steps": 15, "modes": [StepMode.QUIZ, StepMode.FLASHCARD, StepMode.BLURTING], "teach": False},
 }
 

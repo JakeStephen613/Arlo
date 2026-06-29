@@ -10,6 +10,7 @@ import {
   Command,
   GraduationCap,
   FolderOpen,
+  BarChart3,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { path: '/', label: 'Home', icon: Home },
   { path: '/session', label: 'Study', icon: BookOpen },
   { path: '/subjects', label: 'Subjects', icon: FolderOpen },
+  { path: '/progress', label: 'Progress', icon: BarChart3 },
   { path: '/library', label: 'History', icon: Library },
   { path: '/tutor', label: 'Tutor', icon: GraduationCap },
 ];

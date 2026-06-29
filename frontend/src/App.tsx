@@ -14,6 +14,7 @@ import SubjectsPage from "./pages/SubjectsPage";
 import SubjectDetailPage from "./pages/SubjectDetailPage";
 import TutorDashboard from "./pages/TutorDashboard";
 import StudentSessionHistory from "./pages/StudentSessionHistory";
+import Progress from "./pages/Progress";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -52,6 +53,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <AppShell><LibraryPage /></AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/progress"
+              element={
+                <ProtectedRoute>
+                  <AppShell><Progress /></AppShell>
                 </ProtectedRoute>
               }
             />
