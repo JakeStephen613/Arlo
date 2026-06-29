@@ -5,7 +5,6 @@ import {
   TrendingDown,
   Minus,
   BarChart3,
-  Calendar,
   Target,
   Clock,
   Flame,
@@ -56,15 +55,8 @@ interface ConceptHistory {
   total_attempts: number;
 }
 
-interface CalendarDay {
-  date: string;
-  sessions: number;
-  minutes: number;
-}
-
 interface MasteryHistory {
   concepts: ConceptHistory[];
-  calendar: CalendarDay[];
 }
 
 interface DueReview {
@@ -86,7 +78,7 @@ export default function ProgressPage() {
   const [history, setHistory] = useState<MasteryHistory | null>(null);
   const [dueReviews, setDueReviews] = useState<DueReview[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'concepts' | 'calendar'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'concepts'>('overview');
 
   useEffect(() => {
     const load = async () => {
@@ -196,7 +188,7 @@ export default function ProgressPage() {
 
           {/* Tab navigation */}
           <div className="flex gap-1 rounded-lg bg-secondary p-1">
-            {(['overview', 'concepts', 'calendar'] as const).map(tab => (
+            {(['overview', 'concepts'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -308,9 +300,6 @@ export default function ProgressPage() {
             </div>
           )}
 
-          {activeTab === 'calendar' && (
-            <StudyCalendar calendar={history?.calendar || []} />
-          )}
         </>
       )}
     </div>
@@ -365,119 +354,6 @@ function ConceptCard({ concept, onStudy }: { concept: ConceptHistory; onStudy: (
   );
 }
 
-function StudyCalendar({ calendar }: { calendar: CalendarDay[] }) {
-  const today = new Date();
-  const numWeeks = 16;
-  const startDate = new Date(today);
-  startDate.setDate(startDate.getDate() - (numWeeks * 7 - 1) - startDate.getDay());
-
-  const calMap = new Map(calendar.map(d => [d.date, d]));
-
-  // Build columns (weeks), each with 7 rows (days Sun-Sat) — GitHub style
-  const weeks: (CalendarDay | null)[][] = [];
-  const cursor = new Date(startDate);
-  for (let w = 0; w < numWeeks; w++) {
-    const week: (CalendarDay | null)[] = [];
-    for (let d = 0; d < 7; d++) {
-      if (cursor > today) {
-        week.push(null);
-      } else {
-        const key = cursor.toISOString().slice(0, 10);
-        week.push(calMap.get(key) || { date: key, sessions: 0, minutes: 0 });
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    weeks.push(week);
-  }
-
-  const maxMins = Math.max(...calendar.map(d => d.minutes), 1);
-  const todayKey = today.toISOString().slice(0, 10);
-
-  const dayLabels = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
-
-  // Month labels
-  const monthLabels: { label: string; col: number }[] = [];
-  let lastMonth = -1;
-  for (let w = 0; w < weeks.length; w++) {
-    const firstDay = weeks[w].find(d => d !== null);
-    if (firstDay) {
-      const month = new Date(firstDay.date).getMonth();
-      if (month !== lastMonth) {
-        monthLabels.push({ label: new Date(firstDay.date).toLocaleDateString('en-US', { month: 'short' }), col: w });
-        lastMonth = month;
-      }
-    }
-  }
-
-  const totalStudyDays = calendar.filter(d => d.sessions > 0).length;
-  const totalMinutes = calendar.reduce((sum, d) => sum + d.minutes, 0);
-
-  return (
-    <div className="rounded-lg border bg-card p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-medium text-foreground">Study calendar</h3>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span><span className="font-medium text-foreground">{totalStudyDays}</span> days studied</span>
-          <span><span className="font-medium text-foreground">{totalMinutes >= 60 ? `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m` : `${totalMinutes}m`}</span> total</span>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <div className="inline-grid" style={{ gridTemplateColumns: `24px repeat(${numWeeks}, 1fr)`, gap: '3px' }}>
-          {/* Month labels row */}
-          <div />
-          {weeks.map((_, wi) => {
-            const ml = monthLabels.find(m => m.col === wi);
-            return (
-              <div key={wi} className="text-[10px] text-muted-foreground h-4 flex items-end">
-                {ml ? ml.label : ''}
-              </div>
-            );
-          })}
-
-          {/* Day rows */}
-          {[0, 1, 2, 3, 4, 5, 6].map(dayIdx => (
-            <>
-              <div key={`label-${dayIdx}`} className="text-[10px] text-muted-foreground flex items-center justify-end pr-1 h-[14px]">
-                {dayLabels[dayIdx]}
-              </div>
-              {weeks.map((week, wi) => {
-                const day = week[dayIdx];
-                if (!day) return <div key={`${wi}-${dayIdx}`} className="h-[14px] rounded-sm" />;
-                const intensity = day.minutes > 0 ? Math.max(0.2, day.minutes / maxMins) : 0;
-                const isToday = day.date === todayKey;
-                return (
-                  <div
-                    key={`${wi}-${dayIdx}`}
-                    className={cn(
-                      'h-[14px] rounded-sm transition-colors',
-                      isToday && 'ring-1 ring-primary ring-offset-1 ring-offset-card',
-                      day.sessions === 0 && 'bg-secondary/60',
-                    )}
-                    style={day.sessions > 0 ? { backgroundColor: `rgb(34 197 94 / ${intensity})` } : undefined}
-                    title={`${new Date(day.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}: ${day.sessions} session${day.sessions !== 1 ? 's' : ''}, ${day.minutes}m`}
-                  />
-                );
-              })}
-            </>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 mt-3 text-[10px] text-muted-foreground">
-        <span>Less</span>
-        {[0, 0.2, 0.4, 0.7, 1].map((v, i) => (
-          <div
-            key={i}
-            className="w-3 h-3 rounded-sm"
-            style={{ backgroundColor: v === 0 ? 'hsl(var(--secondary))' : `rgb(34 197 94 / ${v})` }}
-          />
-        ))}
-        <span>More</span>
-      </div>
-    </div>
-  );
-}
 
 function StatCard({ icon, label, value, accent, action, actionLabel }: {
   icon: React.ReactNode;

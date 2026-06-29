@@ -4,16 +4,12 @@ import {
   ArrowRight,
   BookOpen,
   Clock,
-  Calendar,
   Layers,
-  FolderOpen,
   ChevronRight,
-  RotateCcw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { apiGet } from '@/lib/apiClient';
 import PausedSessionsDisplay from '@/components/PausedSessionsDisplay';
 import { getColorConfig } from './SubjectsPage';
 
@@ -35,7 +31,6 @@ export default function Index() {
   const { user, userProfile, updateProfile } = useAuth();
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [subjects, setSubjects] = useState<SubjectPreview[]>([]);
-  const [dueCount, setDueCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -52,11 +47,9 @@ export default function Index() {
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(6),
-      apiGet<{ items: unknown[]; total_due: number }>('/learner/due-reviews').catch(() => ({ items: [], total_due: 0 })),
-    ]).then(([{ data: sessData }, { data: subjData }, dueData]) => {
+    ]).then(([{ data: sessData }, { data: subjData }]) => {
       setSessions((sessData as SessionRecord[]) || []);
       setSubjects((subjData as SubjectPreview[]) || []);
-      setDueCount(dueData.total_due || 0);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [user]);
@@ -107,43 +100,19 @@ export default function Index() {
 
       {/* CTA */}
       <button
-        onClick={() => navigate('/session', lastTopic ? { state: { prefillTopic: lastTopic } } : undefined)}
+        onClick={() => navigate('/session')}
         className="w-full flex items-center justify-between rounded-xl bg-forest-700 dark:bg-forest-600 p-6 transition-all hover:bg-forest-600 dark:hover:bg-forest-500 hover:shadow-card group"
       >
         <div className="text-left">
           <p className="text-sm font-medium text-white/70">
-            {isEmpty ? 'Get started' : 'Keep going'}
+            {isEmpty ? 'Get started' : 'Start a new session'}
           </p>
           <p className="text-lg font-bold text-white mt-0.5">
-            {isEmpty
-              ? 'Start your first session'
-              : `Continue with ${lastTopic || 'your studies'}`}
+            {isEmpty ? 'Start your first session' : 'Study something new'}
           </p>
         </div>
         <ArrowRight className="w-5 h-5 text-white opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
       </button>
-
-      {dueCount > 0 && (
-        <button
-          onClick={() => navigate('/session', { state: { prefillTopic: 'Daily Review', startReview: true } })}
-          className="w-full flex items-center justify-between rounded-xl border-2 border-amber-500/30 bg-amber-50 dark:bg-amber-950/20 p-5 transition-all hover:border-amber-500/50 hover:shadow-card group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-amber-500/15 flex items-center justify-center">
-              <RotateCcw className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-semibold text-foreground">
-                Daily Review
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {dueCount} concept{dueCount !== 1 ? 's' : ''} due for spaced repetition
-              </p>
-            </div>
-          </div>
-          <ArrowRight className="w-4 h-4 text-amber-600 dark:text-amber-400 opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
-        </button>
-      )}
 
       <PausedSessionsDisplay onResumeSession={(id) => navigate('/session', { state: { resumeSessionId: id } })} />
 

@@ -165,7 +165,6 @@ export default function Session() {
   const resumeSessionId = (location.state as any)?.resumeSessionId || null;
   const locationSubjectId = (location.state as any)?.subjectId || null;
   const locationSubjectName = (location.state as any)?.subjectName || null;
-  const startReview = (location.state as any)?.startReview || false;
 
   const [phase, setPhase] = useState<SessionPhase>('input');
   const [topic, setTopic] = useState(prefillTopic);
@@ -202,21 +201,35 @@ export default function Session() {
           .eq('id', resumeSessionId)
           .single();
         if (error || !data) return;
-        const sessionPlan = data.session_plan as unknown as StudyPlan;
+        const rawPlan = data.session_plan as any;
         const progressData = (data.progress_data as any) ?? {};
-        setPlan(sessionPlan);
-        const expanded = expandBlocks(sessionPlan.blocks);
-        setSubBlocks(expanded);
-        setCurrentSubBlockIndex(data.current_block_index || 0);
-        // Restore scores from progress_data so performance tracking continues
-        if (Array.isArray(progressData.scores)) {
-          setScores(progressData.scores);
+
+        if (rawPlan?.adaptive) {
+          // Resume adaptive session
+          setUseAdaptive(true);
+          setSessionIntent(rawPlan.intent || 'deep_session');
+          setAdaptiveSession({
+            session_id: rawPlan.session_id,
+            intent: rawPlan.intent,
+            total_steps: rawPlan.total_steps,
+            steps: rawPlan.steps,
+            current_step: { done: false },
+          });
+          setAdaptiveStepIndex(progressData.stepIndex || data.current_block_index || 0);
+          if (Array.isArray(progressData.scores)) setScores(progressData.scores);
+        } else {
+          const sessionPlan = rawPlan as StudyPlan;
+          setPlan(sessionPlan);
+          const expanded = expandBlocks(sessionPlan.blocks);
+          setSubBlocks(expanded);
+          setCurrentSubBlockIndex(data.current_block_index || 0);
+          if (Array.isArray(progressData.scores)) setScores(progressData.scores);
         }
+
         setTopic(data.title || '');
         if ((data as any).subject_id) setSubjectId((data as any).subject_id);
         setPhase('studying');
         setShowResumePrompt(false);
-        // Remove the paused session from DB
         await supabase.from('paused_sessions').delete().eq('id', resumeSessionId);
       } catch (e) {
         console.error('Failed to resume paused session:', e);
@@ -253,37 +266,6 @@ export default function Session() {
     });
   }, []);
 
-  // Auto-start review session from dashboard
-  const startReviewRef = useRef(startReview);
-  useEffect(() => {
-    if (!startReviewRef.current || restoringState) return;
-    startReviewRef.current = false;
-    setUseAdaptive(true);
-    setSessionIntent('quick_review');
-    setTopic('Daily Review');
-    setTimeout(() => {
-      // Trigger adaptive session start
-      (async () => {
-        setPlanLoading(true);
-        setPhase('plan-review');
-        try {
-          const result = await apiPost<AdaptiveSession>('/orchestrator/session', {
-            intent: 'quick_review',
-            topic: 'Daily Review',
-          }, 30000);
-          setAdaptiveSession(result);
-          setAdaptiveStepIndex(0);
-          setPhase('studying');
-        } catch (e: any) {
-          setError(e.message || 'Failed to start review');
-          setPhase('input');
-        } finally {
-          setPlanLoading(false);
-        }
-      })();
-    }, 100);
-  }, [restoringState]);
-
   const discardSaved = () => {
     clearSessionState();
     setPhase('input');
@@ -297,22 +279,35 @@ export default function Session() {
   };
 
   const pauseAndExit = async () => {
-    if (!plan) return;
+    if (!plan && !adaptiveSession) return;
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-      await supabase.from('paused_sessions').insert({
-        user_id: user.id,
-        title: plan.topic || topic,
-        session_plan: plan as any,
-        current_block_index: currentSubBlockIndex,
-        paused_at: new Date().toISOString(),
-        expires_at: expiresAt,
-        // Save scores so we can restore them on resume
-        progress_data: { scores } as any,
-        ...(subjectId ? { subject_id: subjectId } : {}),
-      });
+
+      if (adaptiveSession) {
+        await supabase.from('paused_sessions').insert({
+          user_id: user.id,
+          title: topic || adaptiveSession.steps[0]?.concept_name || 'Adaptive Session',
+          session_plan: { adaptive: true, session_id: adaptiveSession.session_id, intent: adaptiveSession.intent, steps: adaptiveSession.steps, total_steps: adaptiveSession.total_steps } as any,
+          current_block_index: adaptiveStepIndex,
+          paused_at: new Date().toISOString(),
+          expires_at: expiresAt,
+          progress_data: { scores, adaptive: true, stepIndex: adaptiveStepIndex } as any,
+          ...(subjectId ? { subject_id: subjectId } : {}),
+        });
+      } else if (plan) {
+        await supabase.from('paused_sessions').insert({
+          user_id: user.id,
+          title: plan.topic || topic,
+          session_plan: plan as any,
+          current_block_index: currentSubBlockIndex,
+          paused_at: new Date().toISOString(),
+          expires_at: expiresAt,
+          progress_data: { scores } as any,
+          ...(subjectId ? { subject_id: subjectId } : {}),
+        });
+      }
     } catch (e) {
       console.error('Failed to save paused session:', e);
     }
