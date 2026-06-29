@@ -1,6 +1,5 @@
-
 import { useState } from 'react';
-import { StudyBlock } from '@/components/StudyPlanEditor';
+import { StudyBlock } from '@/types';
 
 export const useStudyPlanDragDrop = (
   blocks: StudyBlock[],
@@ -20,15 +19,13 @@ export const useStudyPlanDragDrop = (
 
   const handleDrop = (e: React.DragEvent, dropIndex: number) => {
     e.preventDefault();
-    
     if (draggedIndex === null || draggedIndex === dropIndex) return;
 
     const newBlocks = [...blocks];
     const draggedBlock = newBlocks[draggedIndex];
-    
     newBlocks.splice(draggedIndex, 1);
     newBlocks.splice(dropIndex, 0, draggedBlock);
-    
+
     const updatedBlocks = newBlocks.map((block, index) => ({
       ...block,
       position: index

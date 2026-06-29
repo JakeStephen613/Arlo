@@ -6,9 +6,7 @@ import {
   X,
   BookOpen,
   MessageSquare,
-  Clock,
   Trophy,
-  TrendingUp,
   AlertCircle,
   Send,
   RefreshCw,
@@ -77,51 +75,11 @@ interface ExpandedSubBlock {
 
 type SessionPhase = 'input' | 'plan-review' | 'studying' | 'summary';
 
-// Also used as ExpandedSubBlock mode — keep in sync with backend modes
-type StudyMode = 'teach' | 'quiz' | 'flashcard' | 'feynman' | 'blurting' | 'socratic';
-
 interface BlockScore {
   blockIndex: number;
   mode: string;
   score: number;
 }
-
-type SessionIntent = 'quick_review' | 'learn_new' | 'deep_session' | 'exam_prep';
-
-interface AdaptiveStep {
-  step_number: number;
-  mode: string;
-  concept_id: string;
-  concept_name: string;
-  difficulty: string;
-  rationale: string;
-  completed: boolean;
-  score: number | null;
-}
-
-interface AdaptiveSession {
-  session_id: string;
-  intent: string;
-  total_steps: number;
-  steps: AdaptiveStep[];
-  current_step: {
-    done: boolean;
-    step?: AdaptiveStep;
-    summary?: {
-      concepts_practiced: string[];
-      improved: string[];
-      still_weak: string[];
-      average_score: number;
-    };
-  };
-}
-
-const INTENT_OPTIONS: { value: SessionIntent; label: string; sub: string; icon: typeof BookOpen }[] = [
-  { value: 'deep_session', label: 'Deep', sub: 'Full learning arc', icon: Brain },
-  { value: 'learn_new', label: 'Learn', sub: 'New material', icon: BookOpen },
-  { value: 'quick_review', label: 'Review', sub: 'Due concepts', icon: RefreshCw },
-  { value: 'exam_prep', label: 'Exam', sub: 'Broad drilling', icon: Zap },
-];
 
 // ── Main Component ───────────────────────────────────────────
 
@@ -184,12 +142,6 @@ export default function Session() {
   const [subjectId, setSubjectId] = useState<string | null>(locationSubjectId);
   const [subjectName, setSubjectName] = useState<string | null>(locationSubjectName);
 
-  // Adaptive session state
-  const [useAdaptive, setUseAdaptive] = useState(false);
-  const [sessionIntent, setSessionIntent] = useState<SessionIntent>('deep_session');
-  const [adaptiveSession, setAdaptiveSession] = useState<AdaptiveSession | null>(null);
-  const [adaptiveStepIndex, setAdaptiveStepIndex] = useState(0);
-
   // Resume from Supabase paused session
   useEffect(() => {
     if (!resumeSessionId) return;
@@ -204,27 +156,12 @@ export default function Session() {
         const rawPlan = data.session_plan as any;
         const progressData = (data.progress_data as any) ?? {};
 
-        if (rawPlan?.adaptive) {
-          // Resume adaptive session
-          setUseAdaptive(true);
-          setSessionIntent(rawPlan.intent || 'deep_session');
-          setAdaptiveSession({
-            session_id: rawPlan.session_id,
-            intent: rawPlan.intent,
-            total_steps: rawPlan.total_steps,
-            steps: rawPlan.steps,
-            current_step: { done: false },
-          });
-          setAdaptiveStepIndex(progressData.stepIndex || data.current_block_index || 0);
-          if (Array.isArray(progressData.scores)) setScores(progressData.scores);
-        } else {
-          const sessionPlan = rawPlan as StudyPlan;
-          setPlan(sessionPlan);
-          const expanded = expandBlocks(sessionPlan.blocks);
-          setSubBlocks(expanded);
-          setCurrentSubBlockIndex(data.current_block_index || 0);
-          if (Array.isArray(progressData.scores)) setScores(progressData.scores);
-        }
+        const sessionPlan = rawPlan as StudyPlan;
+        setPlan(sessionPlan);
+        const expanded = expandBlocks(sessionPlan.blocks);
+        setSubBlocks(expanded);
+        setCurrentSubBlockIndex(data.current_block_index || 0);
+        if (Array.isArray(progressData.scores)) setScores(progressData.scores);
 
         setTopic(data.title || '');
         if ((data as any).subject_id) setSubjectId((data as any).subject_id);
@@ -279,91 +216,27 @@ export default function Session() {
   };
 
   const pauseAndExit = async () => {
-    if (!plan && !adaptiveSession) return;
+    if (!plan) return;
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-      if (adaptiveSession) {
-        await supabase.from('paused_sessions').insert({
-          user_id: user.id,
-          title: topic || adaptiveSession.steps[0]?.concept_name || 'Adaptive Session',
-          session_plan: { adaptive: true, session_id: adaptiveSession.session_id, intent: adaptiveSession.intent, steps: adaptiveSession.steps, total_steps: adaptiveSession.total_steps } as any,
-          current_block_index: adaptiveStepIndex,
-          paused_at: new Date().toISOString(),
-          expires_at: expiresAt,
-          progress_data: { scores, adaptive: true, stepIndex: adaptiveStepIndex } as any,
-          ...(subjectId ? { subject_id: subjectId } : {}),
-        });
-      } else if (plan) {
-        await supabase.from('paused_sessions').insert({
-          user_id: user.id,
-          title: plan.topic || topic,
-          session_plan: plan as any,
-          current_block_index: currentSubBlockIndex,
-          paused_at: new Date().toISOString(),
-          expires_at: expiresAt,
-          progress_data: { scores } as any,
-          ...(subjectId ? { subject_id: subjectId } : {}),
-        });
-      }
+      await supabase.from('paused_sessions').insert({
+        user_id: user.id,
+        title: plan.topic || topic,
+        session_plan: plan as any,
+        current_block_index: currentSubBlockIndex,
+        paused_at: new Date().toISOString(),
+        expires_at: expiresAt,
+        progress_data: { scores } as any,
+        ...(subjectId ? { subject_id: subjectId } : {}),
+      });
     } catch (e) {
       console.error('Failed to save paused session:', e);
     }
     clearSessionState();
     navigate(subjectId ? `/subjects/${subjectId}` : '/');
-  };
-
-  const startAdaptiveSession = async () => {
-    if (!topic.trim()) return;
-    setPlanLoading(true);
-    setPhase('plan-review');
-    setError(null);
-    try {
-      const result = await apiPost<AdaptiveSession>('/orchestrator/session', {
-        intent: sessionIntent,
-        topic: topic.trim(),
-      }, 30000);
-      setAdaptiveSession(result);
-      setAdaptiveStepIndex(0);
-      setPhase('studying');
-    } catch (e: any) {
-      setError(e.message || 'Failed to create adaptive session');
-      setPhase('input');
-    } finally {
-      setPlanLoading(false);
-    }
-  };
-
-  const handleAdaptiveStepComplete = async (score: number) => {
-    if (!adaptiveSession) return;
-    try {
-      const result = await apiPost<{
-        done: boolean;
-        step?: AdaptiveStep;
-        summary?: any;
-        steps: AdaptiveStep[];
-        total_steps: number;
-      }>(`/orchestrator/session/${adaptiveSession.session_id}/submit`, { score });
-
-      setAdaptiveSession(prev => prev ? {
-        ...prev,
-        steps: result.steps,
-        total_steps: result.total_steps,
-        current_step: { done: result.done, step: result.step, summary: result.summary },
-      } : null);
-
-      if (result.done) {
-        setScores(prev => [...prev, { blockIndex: adaptiveStepIndex, mode: adaptiveSession.steps[adaptiveStepIndex]?.mode || '', score }]);
-        setPhase('summary');
-      } else {
-        setScores(prev => [...prev, { blockIndex: adaptiveStepIndex, mode: adaptiveSession.steps[adaptiveStepIndex]?.mode || '', score }]);
-        setAdaptiveStepIndex(prev => prev + 1);
-      }
-    } catch {
-      setAdaptiveStepIndex(prev => prev + 1);
-    }
   };
 
   const generatePlan = async () => {
@@ -470,14 +343,10 @@ export default function Session() {
           setDuration={setDuration}
           onPdfParsed={setPdfContent}
           pdfContent={pdfContent}
-          onSubmit={useAdaptive ? startAdaptiveSession : generatePlan}
+          onSubmit={generatePlan}
           subjectId={subjectId}
           subjectName={subjectName}
           onSubjectChange={(id, name) => { setSubjectId(id); setSubjectName(name); }}
-          useAdaptive={useAdaptive}
-          setUseAdaptive={setUseAdaptive}
-          sessionIntent={sessionIntent}
-          setSessionIntent={setSessionIntent}
         />
       )}
       {phase === 'plan-review' && (
@@ -499,17 +368,7 @@ export default function Session() {
           />
         )
       )}
-      {phase === 'studying' && useAdaptive && adaptiveSession && (
-        <AdaptiveStudyingView
-          session={adaptiveSession}
-          stepIndex={adaptiveStepIndex}
-          scores={scores}
-          topic={topic}
-          onComplete={handleAdaptiveStepComplete}
-          onPause={pauseAndExit}
-        />
-      )}
-      {phase === 'studying' && !useAdaptive && plan && subBlocks.length > 0 && (
+      {phase === 'studying' && plan && subBlocks.length > 0 && (
         <StudyingView
           plan={plan}
           subBlocks={subBlocks}
@@ -520,21 +379,17 @@ export default function Session() {
           onSkipTo={(index: number) => setCurrentSubBlockIndex(index)}
         />
       )}
-      {phase === 'summary' && (plan || adaptiveSession) && (
+      {phase === 'summary' && plan && (
         <SummaryView
           plan={plan}
           scores={scores}
           subjectId={subjectId}
-          adaptiveSession={adaptiveSession}
           onHome={() => navigate(subjectId ? `/subjects/${subjectId}` : '/')}
           onAnother={() => {
             setPlan(null);
             setSubBlocks([]);
             setScores([]);
             setTopic('');
-            setAdaptiveSession(null);
-            setAdaptiveStepIndex(0);
-            setUseAdaptive(false);
             setPhase('input');
           }}
         />
@@ -585,7 +440,7 @@ const DURATION_OPTIONS = [
   { value: 120, label: '2h', sub: 'Marathon' },
 ];
 
-function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfContent, onSubmit, subjectId, subjectName, onSubjectChange, useAdaptive, setUseAdaptive, sessionIntent, setSessionIntent }: {
+function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfContent, onSubmit, subjectId, subjectName, onSubjectChange }: {
   topic: string;
   setTopic: (t: string) => void;
   duration: number;
@@ -596,10 +451,6 @@ function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfCo
   subjectId: string | null;
   subjectName: string | null;
   onSubjectChange: (id: string | null, name: string | null) => void;
-  useAdaptive: boolean;
-  setUseAdaptive: (v: boolean) => void;
-  sessionIntent: SessionIntent;
-  setSessionIntent: (i: SessionIntent) => void;
 }) {
   const { user } = useAuth();
   const [uploading, setUploading] = useState(false);
@@ -765,73 +616,13 @@ function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfCo
           </div>
         </div>
 
-        {/* Adaptive mode toggle */}
-        <div className="space-y-3">
-          <button
-            onClick={() => setUseAdaptive(!useAdaptive)}
-            className={cn(
-              'w-full flex items-center justify-between rounded-xl border px-4 py-3 transition-all',
-              useAdaptive
-                ? 'border-primary bg-primary/5'
-                : 'bg-card hover:border-primary/30'
-            )}
-          >
-            <div className="flex items-center gap-2.5">
-              <Brain className={cn('w-4 h-4', useAdaptive ? 'text-primary' : 'text-muted-foreground')} />
-              <div className="text-left">
-                <p className={cn('text-sm font-medium', useAdaptive ? 'text-foreground' : 'text-muted-foreground')}>Adaptive mode</p>
-                <p className="text-[10px] text-muted-foreground">Targets your weak concepts, adapts mid-session</p>
-              </div>
-            </div>
-            <div className={cn(
-              'w-8 h-5 rounded-full transition-colors relative',
-              useAdaptive ? 'bg-primary' : 'bg-secondary'
-            )}>
-              <div className={cn(
-                'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
-                useAdaptive ? 'translate-x-3.5' : 'translate-x-0.5'
-              )} />
-            </div>
-          </button>
-
-          {/* Intent selector — shown when adaptive is on */}
-          {useAdaptive && (
-            <div className="animate-fade-in">
-              <p className="text-xs font-medium text-muted-foreground mb-2 text-center uppercase tracking-wider">Session type</p>
-              <div className="grid grid-cols-4 gap-2">
-                {INTENT_OPTIONS.map(opt => {
-                  const Icon = opt.icon;
-                  return (
-                    <button
-                      key={opt.value}
-                      onClick={() => setSessionIntent(opt.value)}
-                      className={cn(
-                        'rounded-xl py-3 text-center transition-all border',
-                        sessionIntent === opt.value
-                          ? 'bg-primary text-primary-foreground border-primary shadow-sm scale-105'
-                          : 'bg-card text-muted-foreground hover:text-foreground hover:border-primary/30'
-                      )}
-                    >
-                      <Icon className={cn('w-4 h-4 mx-auto mb-1', sessionIntent === opt.value ? 'text-primary-foreground' : '')} />
-                      <div className="text-sm font-bold">{opt.label}</div>
-                      <div className={cn('text-[10px] mt-0.5', sessionIntent === opt.value ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
-                        {opt.sub}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Submit */}
         <button
           onClick={onSubmit}
           disabled={!canSubmit}
           className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-40 shadow-sm hover:shadow-md"
         >
-          {useAdaptive ? 'Start adaptive session' : 'Build my study plan'}
+          Build my study plan
           <ArrowRight className="w-4 h-4" />
         </button>
 
@@ -2091,132 +1882,6 @@ function BlurtingStep({ block, onComplete }: { block: StudyBlock; onComplete: (s
   );
 }
 
-// ── Diagnose Step (lightweight quiz) ────────────────────────
-
-function DiagnoseStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
-  interface QuizQ { question: string; options: string[]; correct_answer: string; explanation: string }
-  const [questions, setQuestions] = useState<QuizQ[]>([]);
-  const [currentQ, setCurrentQ] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [scores, setScores] = useState<number[]>([]);
-
-  const loadQuiz = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await apiPost<any>('/quiz/generate', {
-        content: `Diagnostic check: assess current understanding of ${block.unit}`,
-        difficulty: 'medium',
-        concept_name: block.unit,
-        max_questions: 2,
-      }, 45000);
-      if (res.questions?.length) {
-        setQuestions(res.questions.slice(0, 2));
-      } else {
-        onComplete(0.2);
-      }
-    } catch {
-      setError('Failed to generate diagnostic');
-    }
-    setLoading(false);
-  }, [block.unit]);
-
-  useEffect(() => { loadQuiz(); }, [loadQuiz]);
-
-  const handleReveal = () => {
-    setRevealed(true);
-    const isCorrect = selected === questions[currentQ].correct_answer;
-    setScores(prev => [...prev, isCorrect ? 1.0 : 0.0]);
-  };
-
-  const handleNext = () => {
-    if (currentQ + 1 < questions.length) {
-      setCurrentQ(prev => prev + 1);
-      setSelected(null);
-      setRevealed(false);
-    } else {
-      const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-      onComplete(avg);
-    }
-  };
-
-  if (loading) return <LoadingMode label="Diagnosing knowledge level..." />;
-
-  if (error) {
-    return (
-      <div className="max-w-lg mx-auto w-full text-center space-y-4 animate-fade-in">
-        <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
-        <p className="text-foreground font-semibold">{error}</p>
-        <button
-          onClick={loadQuiz}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          <RefreshCw className="w-4 h-4" /> Retry
-        </button>
-      </div>
-    );
-  }
-
-  if (!questions.length) return null;
-  const q = questions[currentQ];
-
-  return (
-    <div className="max-w-lg mx-auto w-full animate-fade-in space-y-5">
-      <div className="flex items-center gap-2 mb-2">
-        <Badge className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-0 text-xs">Diagnostic</Badge>
-        <span className="text-xs text-muted-foreground">Question {currentQ + 1} of {questions.length}</span>
-      </div>
-      <h3 className="text-lg font-semibold text-foreground leading-snug">{q.question}</h3>
-      <div className="space-y-2">
-        {q.options.map((opt, i) => {
-          const isCorrect = revealed && opt === q.correct_answer;
-          const isWrong = revealed && opt === selected && opt !== q.correct_answer;
-          return (
-            <button
-              key={i}
-              onClick={() => !revealed && setSelected(opt)}
-              className={cn(
-                'w-full text-left rounded-lg border px-4 py-3 text-sm transition-all',
-                !revealed && selected === opt && 'border-primary bg-primary/5 text-foreground',
-                !revealed && selected !== opt && 'border-border hover:border-primary/50 text-foreground',
-                isCorrect && 'border-green-500 bg-green-50 dark:bg-green-900/20 text-foreground',
-                isWrong && 'border-red-500 bg-red-50 dark:bg-red-900/20 text-foreground',
-                revealed && !isCorrect && !isWrong && 'opacity-50',
-              )}
-              disabled={revealed}
-            >
-              {opt}
-            </button>
-          );
-        })}
-      </div>
-      {!revealed && selected && (
-        <button
-          onClick={handleReveal}
-          className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
-          Check
-        </button>
-      )}
-      {revealed && (
-        <div className="space-y-3">
-          <div className={cn('rounded-lg p-3 text-sm', scores[scores.length - 1] === 1 ? 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200')}>
-            {q.explanation}
-          </div>
-          <button
-            onClick={handleNext}
-            className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            {currentQ + 1 < questions.length ? 'Next' : 'Continue'}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Generic Step (fallback) ─────────────────────────────────
 
@@ -2236,375 +1901,6 @@ function GenericStep({ block, mode, onComplete }: { block: StudyBlock; mode: str
   );
 }
 
-// ── Socratic Dialogue Step ──────────────────────────────────
-
-function SocraticStep({ block, onComplete }: { block: StudyBlock; onComplete: (score: number) => void }) {
-  const [messages, setMessages] = useState<{ role: 'assistant' | 'user'; content: string }[]>([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [mastery, setMastery] = useState(0);
-  const [conceptsDemonstrated, setConceptsDemonstrated] = useState<string[]>([]);
-  const [gaps, setGaps] = useState<string[]>([]);
-  const [done, setDone] = useState(false);
-  const [turnCount, setTurnCount] = useState(0);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await apiPost<{
-          message: string;
-          question: string | null;
-          mastery_estimate: number;
-          should_continue: boolean;
-          concepts_demonstrated: string[];
-          gaps: string[];
-          turn_number: number;
-        }>('/socratic/start', {
-          concept_name: block.unit,
-          topic: block.unit,
-          context: block.description,
-        }, 30000);
-        const tutorMsg = [res.message, res.question].filter(Boolean).join('\n\n');
-        setMessages([{ role: 'assistant', content: tutorMsg }]);
-        setMastery(res.mastery_estimate);
-        setTurnCount(res.turn_number);
-      } catch {
-        setMessages([{ role: 'assistant', content: `Let's explore ${block.unit} together. Can you explain what you know about this topic?` }]);
-      }
-      setLoading(false);
-    })();
-  }, [block.id]);
-
-  const handleSend = async () => {
-    if (!input.trim() || sending) return;
-    const userMsg = input.trim();
-    setInput('');
-    setSending(true);
-
-    const newMessages = [...messages, { role: 'user' as const, content: userMsg }];
-    setMessages(newMessages);
-
-    try {
-      const res = await apiPost<{
-        message: string;
-        question: string | null;
-        mastery_estimate: number;
-        should_continue: boolean;
-        concepts_demonstrated: string[];
-        gaps: string[];
-        turn_number: number;
-      }>('/socratic/reply', {
-        concept_name: block.unit,
-        conversation: newMessages,
-        student_response: userMsg,
-      }, 30000);
-
-      const tutorMsg = [res.message, res.question].filter(Boolean).join('\n\n');
-      setMessages(prev => [...prev, { role: 'assistant', content: tutorMsg }]);
-      setMastery(res.mastery_estimate);
-      setConceptsDemonstrated(res.concepts_demonstrated);
-      setGaps(res.gaps);
-      setTurnCount(res.turn_number);
-
-      if (!res.should_continue) {
-        setDone(true);
-      }
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'I had trouble processing that. Can you try again?' }]);
-    }
-    setSending(false);
-  };
-
-  if (loading) return <LoadingMode label="Starting Socratic dialogue..." />;
-
-  return (
-    <div className="max-w-lg mx-auto w-full space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <Badge className="bg-purple-600 text-white border-0">Socratic</Badge>
-          <span className="text-sm text-muted-foreground">{block.unit}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Turn {turnCount}</span>
-          <div className="w-16 h-1.5 bg-secondary rounded-full overflow-hidden">
-            <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${mastery * 100}%` }} />
-          </div>
-          <span className="text-xs font-medium text-muted-foreground">{Math.round(mastery * 100)}%</span>
-        </div>
-      </div>
-
-      {/* Conversation */}
-      <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
-        {messages.map((msg, i) => (
-          <div key={i} className={cn(
-            'rounded-xl p-4 text-sm leading-relaxed',
-            msg.role === 'assistant'
-              ? 'bg-card border text-foreground'
-              : 'bg-primary/10 text-foreground ml-8'
-          )}>
-            {msg.role === 'assistant' && (
-              <div className="flex items-center gap-1.5 mb-2">
-                <Brain className="w-3.5 h-3.5 text-purple-600" />
-                <span className="text-xs font-medium text-purple-600">Arlo</span>
-              </div>
-            )}
-            <div className="whitespace-pre-wrap">{msg.content}</div>
-          </div>
-        ))}
-        {sending && (
-          <div className="rounded-xl bg-card border p-4">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
-              <span className="text-sm text-muted-foreground">Thinking...</span>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input or completion */}
-      {!done ? (
-        <div className="flex gap-2">
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="Type your response..."
-            className="flex-1 rounded-xl border bg-card px-4 py-3 text-sm focus:outline-none focus:border-purple-500 transition-colors"
-            autoFocus
-            disabled={sending}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || sending}
-            className="rounded-xl bg-purple-600 px-4 py-3 text-white hover:bg-purple-700 transition-colors disabled:opacity-40"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-3 animate-fade-in">
-          <div className="rounded-xl border bg-card p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-foreground">Dialogue complete</span>
-              <span className={cn('text-2xl font-bold', mastery >= 0.7 ? 'text-green-600' : mastery >= 0.4 ? 'text-yellow-600' : 'text-red-500')}>
-                {Math.round(mastery * 100)}%
-              </span>
-            </div>
-            {conceptsDemonstrated.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-green-600 mb-1">Demonstrated understanding</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {conceptsDemonstrated.map((c, i) => (
-                    <span key={i} className="rounded-md bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs text-green-700 dark:text-green-300">{c}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {gaps.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-red-500 mb-1">Areas to revisit</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {gaps.map((g, i) => (
-                    <span key={i} className="rounded-md bg-red-100 dark:bg-red-900/30 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">{g}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          <button
-            onClick={() => onComplete(mastery)}
-            className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            Continue
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Adaptive Studying View ──────────────────────────────────
-
-function AdaptiveStudyingView({ session, stepIndex, scores, topic, onComplete, onPause }: {
-  session: AdaptiveSession;
-  stepIndex: number;
-  scores: BlockScore[];
-  topic: string;
-  onComplete: (score: number) => void;
-  onPause: () => void;
-}) {
-  const currentStep = session.steps[stepIndex];
-  if (!currentStep) return null;
-
-  const progressPct = Math.round((stepIndex / session.total_steps) * 100);
-
-  const modeToBlock = (step: AdaptiveStep): StudyBlock => ({
-    id: `adaptive-${step.step_number}`,
-    unit: step.concept_name,
-    technique: step.mode,
-    techniques: [step.mode],
-    phase: step.mode,
-    tool: step.mode,
-    duration: 10,
-    description: step.rationale,
-    position: step.step_number,
-  });
-
-  const block = modeToBlock(currentStep);
-
-  return (
-    <div className="fixed inset-0 lg:left-56 flex gap-6 p-4 bg-background z-10">
-      {/* Sidebar */}
-      <div className="hidden md:flex md:flex-col w-56 shrink-0 space-y-2 overflow-y-auto">
-        <div className="rounded-lg border bg-card p-3 mb-2">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Brain className="w-3.5 h-3.5 text-primary" />
-            <span className="text-xs font-medium text-primary uppercase">Adaptive</span>
-          </div>
-          <p className="text-sm font-semibold text-foreground capitalize">{session.intent.replace('_', ' ')}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{topic}</p>
-        </div>
-
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Steps</p>
-        {session.steps.map((step, i) => {
-          const isDone = step.completed || i < stepIndex;
-          const isCurrent = i === stepIndex;
-          return (
-            <div
-              key={step.step_number}
-              className={cn(
-                'rounded-lg px-3 py-2.5 text-sm transition-all border',
-                isCurrent && 'border-primary bg-primary/5 text-foreground font-medium',
-                isDone && !isCurrent && 'border-transparent bg-secondary/50 text-muted-foreground',
-                !isDone && !isCurrent && 'border-transparent text-muted-foreground'
-              )}
-            >
-              <div className="flex items-center gap-2">
-                {isDone ? (
-                  <Check className="w-4 h-4 text-green-500 shrink-0" />
-                ) : isCurrent ? (
-                  <div className="w-4 h-4 rounded-full border-2 border-primary shrink-0" />
-                ) : (
-                  <div className="w-4 h-4 rounded-full border border-muted-foreground/30 shrink-0" />
-                )}
-                <span className="truncate">{step.concept_name}</span>
-              </div>
-              <div className="flex items-center gap-1 mt-1 ml-6">
-                <span className="text-[10px] text-muted-foreground capitalize">{step.mode}</span>
-                {step.score !== null && (
-                  <span className={cn('text-[10px] font-medium', step.score >= 0.7 ? 'text-green-600' : 'text-yellow-600')}>
-                    {Math.round(step.score * 100)}%
-                  </span>
-                )}
-                <Badge className="text-[8px] px-1 py-0 h-3.5 bg-secondary text-muted-foreground border-0 capitalize">
-                  {step.difficulty}
-                </Badge>
-              </div>
-            </div>
-          );
-        })}
-
-        <button
-          onClick={onPause}
-          className="mt-4 w-full flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-        >
-          <Pause className="w-3 h-3" />
-          Pause & Exit
-        </button>
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        <div className="mb-4 shrink-0">
-          <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-            <span className="flex items-center gap-1.5">
-              <Brain className="w-3 h-3 text-primary" />
-              Step {stepIndex + 1} of {session.total_steps}
-              {currentStep.difficulty !== 'medium' && (
-                <Badge className="text-[9px] px-1.5 py-0 bg-secondary text-muted-foreground border-0 capitalize">{currentStep.difficulty}</Badge>
-              )}
-            </span>
-            <span>{currentStep.concept_name} · {currentStep.mode}</span>
-          </div>
-          <div className="h-1 bg-secondary rounded-full overflow-hidden">
-            <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }} />
-          </div>
-          {currentStep.rationale && (
-            <p className="text-[10px] text-muted-foreground/70 mt-1 italic">{currentStep.rationale}</p>
-          )}
-        </div>
-
-        <div
-          className="flex-1 overflow-y-auto pr-2"
-          style={{
-            maskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)',
-            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)',
-          }}
-        >
-          <div className="py-[15vh]">
-            <AdaptiveModeView step={currentStep} block={block} onComplete={onComplete} />
-          </div>
-        </div>
-
-        <div className="shrink-0 flex items-center justify-end pt-2 pb-1 border-t">
-          <button
-            onClick={() => onComplete(0)}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-          >
-            Skip <ArrowRight className="w-3 h-3" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdaptiveModeView({ step, block, onComplete }: {
-  step: AdaptiveStep;
-  block: StudyBlock;
-  onComplete: (score: number) => void;
-}) {
-  switch (step.mode) {
-    case 'teach':
-      return <TeachingStep block={block} onComplete={onComplete} />;
-    case 'quiz':
-      return <QuizStep block={block} onComplete={onComplete} />;
-    case 'flashcard':
-      return <FlashcardStep block={block} onComplete={onComplete} />;
-    case 'feynman':
-      return <FeynmanStep block={block} onComplete={onComplete} />;
-    case 'blurting':
-      return <BlurtingStep block={block} onComplete={onComplete} />;
-    case 'socratic':
-      return <SocraticStep block={block} onComplete={onComplete} />;
-    case 'diagnose':
-      return <DiagnoseStep block={block} onComplete={onComplete} />;
-    case 'review':
-      return (
-        <div className="max-w-md mx-auto w-full text-center space-y-5 animate-fade-in">
-          <Trophy className="w-12 h-12 text-primary mx-auto" />
-          <h2 className="font-semibold text-foreground text-xl">Session Review</h2>
-          <p className="text-sm text-muted-foreground">Great work! You've completed this session's practice rounds. Ready to see your results?</p>
-          <button
-            onClick={() => onComplete(1.0)}
-            className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            See Summary
-          </button>
-        </div>
-      );
-    default:
-      return <GenericStep block={block} mode={step.mode} onComplete={onComplete} />;
-  }
-}
 
 // ── Loading Mode ────────────────────────────────────────────
 
@@ -2627,11 +1923,10 @@ interface ReviewSheet {
   study_tips: string[];
 }
 
-function SummaryView({ plan, scores, subjectId, adaptiveSession, onHome, onAnother }: {
-  plan: StudyPlan | null;
+function SummaryView({ plan, scores, subjectId, onHome, onAnother }: {
+  plan: StudyPlan;
   scores: BlockScore[];
   subjectId: string | null;
-  adaptiveSession?: AdaptiveSession | null;
   onHome: () => void;
   onAnother: () => void;
 }) {
@@ -2648,11 +1943,9 @@ function SummaryView({ plan, scores, subjectId, adaptiveSession, onHome, onAnoth
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user?.id) return;
         const { saveStudySessionData } = await import('@/services/sessionApi');
-        const sessionTopic = plan?.topic || (adaptiveSession?.steps[0]?.concept_name ?? 'Study Session');
-        const sessionDuration = plan?.total_duration || (adaptiveSession?.total_steps ?? 1) * 10;
         await saveStudySessionData({
-          topic: sessionTopic,
-          duration_minutes: sessionDuration,
+          topic: plan.topic,
+          duration_minutes: plan.total_duration,
           user_id: session.user.id,
           subject_id: subjectId ?? undefined,
         });
@@ -2686,7 +1979,7 @@ function SummaryView({ plan, scores, subjectId, adaptiveSession, onHome, onAnoth
           </div>
           <h2 className="font-display text-3xl font-bold tracking-tight">Session complete</h2>
           <p className="text-muted-foreground mt-2">
-            {plan?.topic || adaptiveSession?.steps[0]?.concept_name || 'Study Session'} · {plan?.total_duration || ((adaptiveSession?.total_steps ?? 0) * 10)} min
+            {plan.topic} · {plan.total_duration} min
           </p>
         </div>
 
@@ -2707,30 +2000,8 @@ function SummaryView({ plan, scores, subjectId, adaptiveSession, onHome, onAnoth
 
         {/* Per-block breakdown */}
         <div className="rounded-xl border bg-card p-5 space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">
-            {adaptiveSession ? 'Step Scores' : 'Block Scores'}
-          </h3>
-          {adaptiveSession ? (
-            adaptiveSession.steps.filter(s => s.completed || s.score !== null).map((step, i) => (
-              <div key={i} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2 truncate flex-1">
-                  <span className="text-muted-foreground truncate">{step.concept_name}</span>
-                  <Badge className="text-[9px] px-1 py-0 bg-secondary text-muted-foreground border-0 capitalize">{step.mode}</Badge>
-                </div>
-                {step.score !== null ? (
-                  <span className={cn(
-                    'font-medium',
-                    step.score >= 0.7 ? 'text-green-600' : step.score >= 0.4 ? 'text-yellow-600' : 'text-red-500'
-                  )}>
-                    {Math.round(step.score * 100)}%
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
-              </div>
-            ))
-          ) : plan ? (
-            plan.blocks.map((block, i) => {
+          <h3 className="text-sm font-semibold text-foreground">Block Scores</h3>
+          {plan.blocks.map((block, i) => {
               const blockScores = scores.filter(s => s.blockIndex === i);
               const blockAvg = blockScores.length > 0
                 ? Math.round((blockScores.reduce((s, x) => s + x.score, 0) / blockScores.length) * 100)
@@ -2750,34 +2021,7 @@ function SummaryView({ plan, scores, subjectId, adaptiveSession, onHome, onAnoth
                   )}
                 </div>
               );
-            })
-          ) : null}
-
-          {/* Adaptive session: show improved/still weak */}
-          {adaptiveSession?.current_step?.summary && (
-            <div className="border-t pt-3 mt-3 space-y-2">
-              {adaptiveSession.current_step.summary.improved.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-green-600 mb-1">Improved</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {adaptiveSession.current_step.summary.improved.map((c, i) => (
-                      <span key={i} className="rounded-md bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs text-green-700 dark:text-green-300">{c}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {adaptiveSession.current_step.summary.still_weak.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-red-500 mb-1">Needs more work</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {adaptiveSession.current_step.summary.still_weak.map((c, i) => (
-                      <span key={i} className="rounded-md bg-red-100 dark:bg-red-900/30 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">{c}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+            })}
         </div>
 
         {/* Review Sheet */}

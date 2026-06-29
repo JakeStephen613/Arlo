@@ -11,8 +11,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import FastSessionPlanner from '@/components/FastSessionPlanner';
 import StudyPlanEditor from '@/components/StudyPlanEditor';
-import { useStudySession } from '@/hooks/useStudySession';
-import { StudyPlan } from '@/services/api';
+import { StudyPlan, generateStudyPlan } from '@/services/api';
+import { PlanInputData } from '@/components/FastSessionPlanner';
 import AppHeader from '@/components/layout/AppHeader';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -86,14 +86,21 @@ const TutorDashboard = () => {
   const [sessionNote, setSessionNote] = useState('');
   const [dueDate, setDueDate] = useState<Date | undefined>(undefined);
   const [viewingStudentHistory, setViewingStudentHistory] = useState<ConnectedStudent | null>(null);
-  const {
-    currentPlan,
-    setCurrentPlan,
-    appState,
-    setAppState,
-    handleGeneratePlan,
-    isGenerating
-  } = useStudySession();
+  const [currentPlan, setCurrentPlan] = useState<StudyPlan | null>(null);
+  const [appState, setAppState] = useState<'planning' | 'editing-plan'>('planning');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const handleGeneratePlan = async (planData: PlanInputData) => {
+    setIsGenerating(true);
+    try {
+      const plan = await generateStudyPlan(planData);
+      setCurrentPlan(plan);
+      setAppState('editing-plan');
+    } catch {
+      toast({ title: 'Failed to generate plan', variant: 'destructive' });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
   useEffect(() => {
     // Handle authentication and role checking
     if (!user && !authLoading) {

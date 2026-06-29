@@ -2,7 +2,6 @@
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Play, BookOpen } from 'lucide-react';
 import { StudyPlan } from './StudyPlanEditor';
-import { formatSessionTitle } from '@/utils/sessionTitle';
 
 interface StudyPlanHeaderProps {
   plan: StudyPlan;
@@ -57,7 +56,7 @@ const StudyPlanHeader = ({ plan, onBack, onSave, onStartSession, hasUnsavedChang
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-foreground">
-                  {formatSessionTitle(plan.topic)}
+                  {plan.topic}
                 </h1>
                 <p className="text-muted-foreground">
                   Customize your study session

@@ -1,20 +1,16 @@
-
 import { useState, useEffect } from 'react';
-import { StudyPlan, StudyBlock } from '@/components/StudyPlanEditor';
+import { StudyPlan, StudyBlock } from '@/types';
 import { getBlockDuration } from '@/utils/studyPlanValidation';
 
 export const useStudyPlanState = (initialPlan: StudyPlan) => {
   const [editingPlan, setEditingPlan] = useState<StudyPlan>(initialPlan);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
 
-  // Recalculate total duration whenever blocks change
   useEffect(() => {
     const totalDuration = editingPlan.blocks.reduce((sum, block) => {
-      const blockDuration = getBlockDuration(block);
-      return sum + blockDuration;
+      return sum + getBlockDuration(block);
     }, 0);
 
-    // Get all techniques from all blocks (including multi-technique blocks)
     const allTechniques = editingPlan.blocks.flatMap(block => {
       if (block.techniques && block.techniques.length > 0) {
         return block.techniques.map(step => (step as any).name || step.technique);
@@ -36,7 +32,7 @@ export const useStudyPlanState = (initialPlan: StudyPlan) => {
   const updateBlock = (blockId: string, updates: Partial<StudyBlock>) => {
     setEditingPlan(prev => ({
       ...prev,
-      blocks: prev.blocks.map(block => 
+      blocks: prev.blocks.map(block =>
         block.id === blockId ? { ...block, ...updates } : block
       )
     }));

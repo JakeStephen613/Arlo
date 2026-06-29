@@ -70,14 +70,10 @@ class StudyPlanOutput(BaseModel):
 
 # --- Utility Functions ---
 def extract_user_id(request: Request) -> str:
-    """Extract user ID from request state or headers"""
     user_info = getattr(request.state, "user", None)
     if user_info and "sub" in user_info:
         return user_info["sub"]
-    elif request.headers.get("x-user-id"):
-        return request.headers["x-user-id"]
-    else:
-        raise HTTPException(status_code=400, detail="Missing user_id in request")
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
 def calculate_optimal_blocks(duration: int) -> Tuple[int, int]:
     """

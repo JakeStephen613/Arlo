@@ -9,8 +9,6 @@ router = APIRouter()
 
 
 def _get_user_id(request: Request) -> str:
-    if request.headers.get("x-user-id"):
-        return request.headers["x-user-id"]
     user = getattr(request.state, "user", {})
     uid = user.get("sub")
     if not uid:
@@ -230,8 +228,8 @@ def _calc_trend(scores: list[float]) -> str:
     if len(scores) < 2:
         return "stable"
     half = len(scores) // 2
-    recent = sum(scores[:half]) / max(1, half)
-    older = sum(scores[half:]) / max(1, len(scores) - half)
+    older = sum(scores[:half]) / max(1, half)
+    recent = sum(scores[half:]) / max(1, len(scores) - half)
     diff = recent - older
     if diff > 0.1:
         return "improving"

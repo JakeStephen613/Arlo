@@ -1,6 +1,4 @@
-# ENHANCED TUTORING CHATBOT MODULE
-
-from fastapi import APIRouter, FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -26,7 +24,6 @@ CONTEXT_API = CONTEXT_API_BASE
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("chatbot")
 
-app = FastAPI()
 router = APIRouter()
 
 # ---------------------------
@@ -109,12 +106,13 @@ HELP_SCHEMA = {
 # Enhanced Helpers
 # ---------------------------
 def extract_user_id(request: Request, data: ChatbotInput) -> str:
-    if request.headers.get("x-user-id"):
-        return request.headers["x-user-id"]
-    elif data.user_id:
+    user = getattr(request.state, "user", {})
+    uid = user.get("sub")
+    if uid:
+        return uid
+    if data.user_id:
         return data.user_id
-    else:
-        raise HTTPException(status_code=400, detail="Missing user_id in request")
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
 def build_enhanced_prompt(data: ChatbotInput) -> str:
     """Build an enhanced prompt for tutoring with better context and examples"""
@@ -326,10 +324,10 @@ async def save_chat_context(request: Request, payload: Dict[str, Any]):
     try:
         logger.info("Saving enhanced chatbot context")
         
-        # Extract user_id from request or payload
-        user_id = request.headers.get("x-user-id") or payload.get("user_id")
+        user = getattr(request.state, "user", {})
+        user_id = user.get("sub") or payload.get("user_id")
         if not user_id:
-            raise HTTPException(status_code=400, detail="Missing user_id")
+            raise HTTPException(status_code=401, detail="Not authenticated")
         
         # Structure payload to match API expectations with required 'source' field
         formatted_payload = {
@@ -363,8 +361,3 @@ async def save_chat_context(request: Request, payload: Dict[str, Any]):
         logger.error(f"Context save failed: {e}")
         return {"status": "error", "detail": str(e)}
 
-
-# ---------------------------
-# Include in App
-# ---------------------------
-app.include_router(router)

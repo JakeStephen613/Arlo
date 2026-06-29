@@ -602,11 +602,11 @@ async def update_context(update: ContextUpdate, request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to update context: {str(e)}")
 
 @router.get("/context/cache")
-def get_context_cache(user_id: str):
+async def get_context_cache(user_id: str):
     start_time = time.time()
-    
+
     try:
-        result = get_cached_context_fast(user_id)
+        result = await get_cached_context_fast(user_id)
         elapsed_ms = (time.time() - start_time) * 1000
         result["response_time_ms"] = round(elapsed_ms, 2)
         logger.info(f"Context cache for {user_id}: {result['source']} in {elapsed_ms:.2f}ms")
@@ -634,7 +634,7 @@ async def get_context_slice(request: Request, focus: Optional[str] = None):
         raise HTTPException(status_code=400, detail="Missing user ID")
     
     try:
-        cache_result = get_cached_context_fast(user_id)
+        cache_result = await get_cached_context_fast(user_id)
         context = cache_result["context"]
         
         if focus == "review":

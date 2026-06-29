@@ -82,8 +82,6 @@ def _get_user_id(request: Request, fallback: Optional[str] = None) -> str:
     uid = user.get("sub")
     if uid:
         return uid
-    if request.headers.get("x-user-id"):
-        return request.headers["x-user-id"]
     if fallback:
         return fallback
     raise HTTPException(status_code=401, detail="Not authenticated")

@@ -99,44 +99,6 @@ export const markAssignedSessionComplete = async (
 export const generateBedtimeReviewSheet = (userId: string): Promise<unknown> =>
   apiPost('/review-sheet', { user_id: userId });
 
-export const saveSession = async (sessionData: {
-  user_id: string;
-  topic: string;
-  duration: number;
-  review_sheet?: unknown;
-  quiz_mistakes?: unknown[];
-  flashcards?: unknown[];
-  timestamp?: string;
-}) => {
-  const { data, error } = await supabase
-    .from('study_session_data')
-    .insert({
-      user_id: sessionData.user_id,
-      topic: sessionData.topic,
-      duration_minutes: sessionData.duration,
-      review_sheet: sessionData.review_sheet || {},
-      quiz_mistakes: sessionData.quiz_mistakes || [],
-      flashcards: sessionData.flashcards || [],
-      timestamp: sessionData.timestamp || new Date().toISOString(),
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-
-  await markAssignedSessionComplete(sessionData.user_id, sessionData.topic, {
-    review_sheet: sessionData.review_sheet,
-    quiz_mistakes: sessionData.quiz_mistakes,
-    flashcards: sessionData.flashcards,
-    duration_minutes: sessionData.duration,
-  });
-
-  return data;
-};
-
-export const resetContext = (userId: string): Promise<unknown> =>
-  apiPost('/context/reset', { user_id: userId });
-
 export const fetchSessionHistory = async (userId: string): Promise<SessionHistoryItem[]> => {
   const { data, error } = await supabase
     .from('study_session_data')

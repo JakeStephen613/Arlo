@@ -1,5 +1,4 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatSessionTitle } from '@/utils/sessionTitle';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Play, Clock, Calendar as CalendarIcon } from 'lucide-react';
@@ -65,7 +64,7 @@ const PausedSessionCard = ({ session, onResume }: PausedSessionCardProps) => {
       
       <CardContent className="space-y-3 pt-0">
         <div className="bg-white/60 rounded-lg p-3">
-          <h3 className="font-medium text-slate-800 mb-2 text-sm">{formatSessionTitle(session.title)}</h3>
+          <h3 className="font-medium text-slate-800 mb-2 text-sm">{session.title}</h3>
           
           <div className="flex items-center gap-3 text-xs text-slate-600 mb-2">
             <span className="flex items-center gap-1">

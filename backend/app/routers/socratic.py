@@ -52,8 +52,6 @@ def _get_user_id(request: Request) -> str:
     user = getattr(request.state, "user", {})
     uid = user.get("sub")
     if not uid:
-        if request.headers.get("x-user-id"):
-            return request.headers["x-user-id"]
         raise HTTPException(status_code=401, detail="Not authenticated")
     return uid
 

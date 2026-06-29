@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { formatSessionTitle } from '@/utils/sessionTitle';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -217,7 +216,7 @@ const StudentSessionHistory = () => {
                       <div className="flex items-start gap-3 text-left w-full">
                         <div className="w-full">
                           <div className="flex items-center justify-between mb-2">
-                            <h4 className="font-medium text-gray-900">{formatSessionTitle(session.title)}</h4>
+                            <h4 className="font-medium text-gray-900">{(session.title)}</h4>
                             <Badge 
                               variant={session.status === 'completed' ? 'default' : session.status === 'in_progress' ? 'secondary' : 'outline'}
                               className={
@@ -385,7 +384,7 @@ const StudentSessionHistory = () => {
                           <div className="bg-gray-50 rounded-lg p-3">
                             <h5 className="font-medium text-gray-900 mb-2">Session Plan</h5>
                             <p className="text-sm text-gray-600">
-                              Topic: {formatSessionTitle(session.session_plan?.topic || session.title)}
+                              Topic: {(session.session_plan?.topic || session.title)}
                             </p>
                             {session.session_plan?.total_duration && (
                               <p className="text-sm text-gray-600">

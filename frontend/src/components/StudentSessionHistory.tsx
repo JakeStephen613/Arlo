@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { formatSessionTitle } from '@/utils/sessionTitle';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -216,7 +215,7 @@ const StudentSessionHistory = ({ studentId, studentName, studentEmail, onBack }:
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <h4 className="font-bold text-lg text-gray-900 mb-2 leading-tight">{formatSessionTitle(session.title)}</h4>
+                          <h4 className="font-bold text-lg text-gray-900 mb-2 leading-tight">{session.title}</h4>
                           <div className="flex items-center gap-6 text-sm mb-3">
                             <span className="flex items-center gap-2 text-green-600 bg-green-50 px-3 py-1 rounded-full">
                               <Calendar className="w-4 h-4" />
