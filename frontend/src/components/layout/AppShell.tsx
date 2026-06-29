@@ -9,6 +9,7 @@ import {
   X,
   Command,
   GraduationCap,
+  FolderOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -21,8 +22,9 @@ interface AppShellProps {
 
 const NAV_ITEMS = [
   { path: '/', label: 'Home', icon: Home },
-  { path: '/session', label: 'Session', icon: BookOpen },
-  { path: '/library', label: 'Library', icon: Library },
+  { path: '/session', label: 'Study', icon: BookOpen },
+  { path: '/subjects', label: 'Subjects', icon: FolderOpen },
+  { path: '/library', label: 'History', icon: Library },
   { path: '/tutor', label: 'Tutor', icon: GraduationCap },
 ];
 
@@ -137,7 +139,7 @@ function SidebarContent({ currentPath, onNavigate, onClose, onOpenCommand, userE
 
       <div className="flex-1 py-3 px-2 space-y-0.5">
         {NAV_ITEMS.filter(item => item.path !== '/tutor' || accountMode === 'tutor').map(item => {
-          const active = item.path === '/' ? currentPath === '/' : currentPath.startsWith(item.path);
+          const active = item.path === '/' ? currentPath === '/' : currentPath === item.path || currentPath.startsWith(item.path + '/');
           return (
             <button
               key={item.path}

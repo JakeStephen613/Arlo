@@ -20,6 +20,8 @@ import {
   Pause,
   Play,
   Timer,
+  Upload,
+  FolderOpen,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { apiPost } from '@/lib/apiClient';
@@ -29,6 +31,7 @@ import StudyPlanEditor from '@/components/StudyPlanEditor';
 import ArloChatbot from '@/components/ArloChatbot';
 import { usePomodoroClock } from '@/hooks/usePomodoroClock';
 import { generateBedtimeReviewSheet } from '@/services/sessionApi';
+import { useAuth } from '@/contexts/AuthContext';
 import type { StudyPlan as SharedStudyPlan } from '@/types';
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
@@ -125,6 +128,8 @@ export default function Session() {
   const location = useLocation();
   const prefillTopic = (location.state as any)?.prefillTopic || '';
   const resumeSessionId = (location.state as any)?.resumeSessionId || null;
+  const locationSubjectId = (location.state as any)?.subjectId || null;
+  const locationSubjectName = (location.state as any)?.subjectName || null;
 
   // Try to restore a saved session
   const savedState = useRef(loadSessionState());
@@ -143,6 +148,8 @@ export default function Session() {
   const [preloadedContent, setPreloadedContent] = useState<Record<string, boolean>>({});
 
   const [planLoading, setPlanLoading] = useState(false);
+  const [subjectId, setSubjectId] = useState<string | null>(locationSubjectId);
+  const [subjectName, setSubjectName] = useState<string | null>(locationSubjectName);
 
   // Resume from Supabase paused session
   useEffect(() => {
@@ -156,11 +163,17 @@ export default function Session() {
           .single();
         if (error || !data) return;
         const sessionPlan = data.session_plan as unknown as StudyPlan;
+        const progressData = (data.progress_data as any) ?? {};
         setPlan(sessionPlan);
         const expanded = expandBlocks(sessionPlan.blocks);
         setSubBlocks(expanded);
         setCurrentSubBlockIndex(data.current_block_index || 0);
+        // Restore scores from progress_data so performance tracking continues
+        if (Array.isArray(progressData.scores)) {
+          setScores(progressData.scores);
+        }
         setTopic(data.title || '');
+        if ((data as any).subject_id) setSubjectId((data as any).subject_id);
         setPhase('studying');
         setShowResumePrompt(false);
         // Remove the paused session from DB
@@ -202,19 +215,22 @@ export default function Session() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-      await supabase.from('paused_sessions').upsert({
+      await supabase.from('paused_sessions').insert({
         user_id: user.id,
         title: plan.topic || topic,
         session_plan: plan as any,
         current_block_index: currentSubBlockIndex,
         paused_at: new Date().toISOString(),
         expires_at: expiresAt,
-      }, { onConflict: 'user_id' });
+        // Save scores so we can restore them on resume
+        progress_data: { scores } as any,
+        ...(subjectId ? { subject_id: subjectId } : {}),
+      });
     } catch (e) {
       console.error('Failed to save paused session:', e);
     }
     clearSessionState();
-    navigate('/');
+    navigate(subjectId ? `/subjects/${subjectId}` : '/');
   };
 
   const generatePlan = async () => {
@@ -314,6 +330,9 @@ export default function Session() {
           onPdfParsed={setPdfContent}
           pdfContent={pdfContent}
           onSubmit={generatePlan}
+          subjectId={subjectId}
+          subjectName={subjectName}
+          onSubjectChange={(id, name) => { setSubjectId(id); setSubjectName(name); }}
         />
       )}
       {phase === 'plan-review' && (
@@ -350,7 +369,8 @@ export default function Session() {
         <SummaryView
           plan={plan}
           scores={scores}
-          onHome={() => navigate('/')}
+          subjectId={subjectId}
+          onHome={() => navigate(subjectId ? `/subjects/${subjectId}` : '/')}
           onAnother={() => {
             setPlan(null);
             setSubBlocks([]);
@@ -399,9 +419,14 @@ function expandBlocks(blocks: StudyBlock[]): ExpandedSubBlock[] {
 
 // ── Topic Input ──────────────────────────────────────────────
 
-const DURATION_OPTIONS = [30, 60, 90, 120];
+const DURATION_OPTIONS = [
+  { value: 30, label: '30m', sub: 'Quick' },
+  { value: 60, label: '1h', sub: 'Standard' },
+  { value: 90, label: '1.5h', sub: 'Deep' },
+  { value: 120, label: '2h', sub: 'Marathon' },
+];
 
-function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfContent, onSubmit }: {
+function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfContent, onSubmit, subjectId, subjectName, onSubjectChange }: {
   topic: string;
   setTopic: (t: string) => void;
   duration: number;
@@ -409,9 +434,23 @@ function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfCo
   onPdfParsed: (content: string | null) => void;
   pdfContent: string | null;
   onSubmit: () => void;
+  subjectId: string | null;
+  subjectName: string | null;
+  onSubjectChange: (id: string | null, name: string | null) => void;
 }) {
+  const { user } = useAuth();
   const [uploading, setUploading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [subjects, setSubjects] = useState<Array<{ id: string; name: string; color: string }>>([]);
+  const [showSubjectPicker, setShowSubjectPicker] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase.from('subjects' as any).select('id, name, color').eq('user_id', user.id)
+      .order('name').then(({ data }) => {
+        if (data) setSubjects(data as any[]);
+      });
+  }, [user]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -435,71 +474,151 @@ function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfCo
     }
   };
 
+  const canSubmit = topic.trim().length > 0 || !!pdfContent;
+
   return (
-    <div className="flex-1 flex items-center justify-center py-8">
-      <div className="max-w-2xl mx-auto w-full space-y-8">
-        <div className="text-center">
-          <h1 className="font-display text-3xl font-bold tracking-tight text-foreground">Start a study session</h1>
-          <p className="text-muted-foreground mt-2">Enter a topic or upload study materials and Arlo will build a structured curriculum for you.</p>
+    <div className="flex-1 flex items-center justify-center py-6 sm:py-12">
+      <div className="w-full max-w-xl mx-auto space-y-6">
+
+        {/* Header */}
+        <div className="text-center space-y-1">
+          <h1 className="font-display text-3xl font-bold tracking-tight">What are you studying?</h1>
+          <p className="text-muted-foreground text-sm">Arlo will build a structured session plan for you.</p>
         </div>
 
-        <div className="space-y-5">
-          <textarea
-            value={topic}
-            onChange={e => setTopic(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && (topic.trim() || pdfContent)) { e.preventDefault(); onSubmit(); } }}
-            placeholder="e.g. Cell Biology, Linear Algebra, World War 2, or paste detailed notes..."
-            className="w-full rounded-xl border-2 bg-card px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors text-lg resize-none min-h-[60px]"
-            rows={2}
-            autoFocus
-          />
+        {/* Main card */}
+        <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
 
-          <div className="flex items-center justify-center">
+          {/* Topic input */}
+          <div className="p-5 pb-4">
+            <textarea
+              value={topic}
+              onChange={e => setTopic(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && canSubmit) { e.preventDefault(); onSubmit(); } }}
+              placeholder="e.g. Cell Biology, Linear Algebra, French Revolution, Organic Chemistry..."
+              className="w-full bg-transparent text-foreground placeholder:text-muted-foreground/60 focus:outline-none text-base resize-none leading-relaxed"
+              rows={3}
+              autoFocus
+            />
+          </div>
+
+          {/* Divider */}
+          <div className="border-t" />
+
+          {/* Toolbar row */}
+          <div className="flex items-center gap-2 px-4 py-3 flex-wrap">
+
+            {/* Subject picker */}
+            <div className="relative">
+              <button
+                onClick={() => setShowSubjectPicker(!showSubjectPicker)}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                  subjectId
+                    ? 'bg-primary/10 text-primary'
+                    : 'bg-secondary text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                {subjectName ?? 'No subject'}
+                {subjectId && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onSubjectChange(null, null); }}
+                    className="ml-0.5 hover:text-destructive"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </button>
+              {showSubjectPicker && (
+                <div className="absolute top-full left-0 mt-1 z-50 w-52 rounded-xl border bg-card shadow-lg overflow-hidden animate-fade-in">
+                  <div className="p-1">
+                    <button
+                      onClick={() => { onSubjectChange(null, null); setShowSubjectPicker(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:bg-secondary rounded-lg transition-colors"
+                    >
+                      No subject
+                    </button>
+                    {subjects.map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => { onSubjectChange(s.id, s.name); setShowSubjectPicker(false); }}
+                        className={cn(
+                          'w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors',
+                          subjectId === s.id ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-secondary text-foreground'
+                        )}
+                      >
+                        <div className={cn('w-2 h-2 rounded-full', `bg-${s.color}-500`)} />
+                        {s.name}
+                      </button>
+                    ))}
+                    {subjects.length === 0 && (
+                      <p className="px-3 py-2 text-xs text-muted-foreground">No subjects yet. Create one in Subjects.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* PDF upload */}
             <label className={cn(
-              'cursor-pointer rounded-xl border-2 border-dashed px-8 py-4 text-base font-medium transition-colors w-full text-center',
-              fileName ? 'border-primary/50 bg-primary/5 text-foreground' : 'border-muted-foreground/30 text-muted-foreground hover:border-primary/30'
+              'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+              fileName
+                ? 'bg-primary/10 text-primary'
+                : 'bg-secondary text-muted-foreground hover:text-foreground'
             )}>
-              {uploading ? 'Parsing...' : fileName ? `${fileName}` : 'Upload PDF (optional)'}
+              <Upload className="w-3.5 h-3.5" />
+              {uploading ? 'Parsing...' : fileName ? fileName : 'Upload PDF'}
               <input type="file" accept=".pdf" onChange={handleFileUpload} className="hidden" />
             </label>
             {fileName && (
               <button
                 onClick={() => { setFileName(null); onPdfParsed(null); }}
-                className="ml-2 text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
-
-          <div>
-            <p className="text-sm text-muted-foreground mb-2 text-center">Session duration</p>
-            <div className="flex gap-2 justify-center">
-              {DURATION_OPTIONS.map(d => (
-                <button
-                  key={d}
-                  onClick={() => setDuration(d)}
-                  className={cn(
-                    'rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                    duration === d
-                      ? 'bg-primary text-primary-foreground'
-                      : 'border bg-card text-muted-foreground hover:border-primary/30'
-                  )}
-                >
-                  {d} min
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button
-            onClick={onSubmit}
-            disabled={!topic.trim() && !pdfContent}
-            className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
-          >
-            Generate Study Plan
-          </button>
         </div>
+
+        {/* Duration selector */}
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-2.5 text-center uppercase tracking-wider">Session length</p>
+          <div className="grid grid-cols-4 gap-2">
+            {DURATION_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setDuration(opt.value)}
+                className={cn(
+                  'rounded-xl py-3 text-center transition-all border',
+                  duration === opt.value
+                    ? 'bg-primary text-primary-foreground border-primary shadow-sm scale-105'
+                    : 'bg-card text-muted-foreground hover:text-foreground hover:border-primary/30'
+                )}
+              >
+                <div className="text-sm font-bold">{opt.label}</div>
+                <div className={cn('text-[10px] mt-0.5', duration === opt.value ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+                  {opt.sub}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Submit */}
+        <button
+          onClick={onSubmit}
+          disabled={!canSubmit}
+          className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-40 shadow-sm hover:shadow-md"
+        >
+          Build my study plan
+          <ArrowRight className="w-4 h-4" />
+        </button>
+
+        {!canSubmit && (
+          <p className="text-center text-xs text-muted-foreground">Type a topic above or upload a PDF to get started</p>
+        )}
       </div>
     </div>
   );
@@ -1792,9 +1911,10 @@ interface ReviewSheet {
   study_tips: string[];
 }
 
-function SummaryView({ plan, scores, onHome, onAnother }: {
+function SummaryView({ plan, scores, subjectId, onHome, onAnother }: {
   plan: StudyPlan;
   scores: BlockScore[];
+  subjectId: string | null;
   onHome: () => void;
   onAnother: () => void;
 }) {
@@ -1815,7 +1935,8 @@ function SummaryView({ plan, scores, onHome, onAnother }: {
           topic: plan.topic,
           duration_minutes: plan.total_duration,
           user_id: session.user.id,
-        });
+          ...(subjectId ? { subject_id: subjectId } : {}),
+        } as any);
 
         // Generate review sheet
         setReviewLoading(true);

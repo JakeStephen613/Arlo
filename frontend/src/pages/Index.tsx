@@ -6,11 +6,14 @@ import {
   Clock,
   Calendar,
   Layers,
+  FolderOpen,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import PausedSessionsDisplay from '@/components/PausedSessionsDisplay';
+import { getColorConfig } from './SubjectsPage';
 
 interface SessionRecord {
   id: string;
@@ -19,24 +22,38 @@ interface SessionRecord {
   timestamp: string;
 }
 
+interface SubjectPreview {
+  id: string;
+  name: string;
+  color: string;
+}
+
 export default function Index() {
   const navigate = useNavigate();
   const { user, userProfile, updateProfile } = useAuth();
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [subjects, setSubjects] = useState<SubjectPreview[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) { setLoading(false); return; }
-    supabase
-      .from('study_session_data')
-      .select('id, topic, duration_minutes, timestamp')
-      .eq('user_id', user.id)
-      .order('timestamp', { ascending: false })
-      .then(({ data }) => {
-        setSessions((data as SessionRecord[]) || []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    Promise.all([
+      supabase
+        .from('study_session_data')
+        .select('id, topic, duration_minutes, timestamp')
+        .eq('user_id', user.id)
+        .order('timestamp', { ascending: false }),
+      supabase
+        .from('subjects' as any)
+        .select('id, name, color')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(6),
+    ]).then(([{ data: sessData }, { data: subjData }]) => {
+      setSessions((sessData as SessionRecord[]) || []);
+      setSubjects((subjData as SubjectPreview[]) || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [user]);
 
   if (loading) {
@@ -102,6 +119,32 @@ export default function Index() {
       </button>
 
       <PausedSessionsDisplay onResumeSession={(id) => navigate('/session', { state: { resumeSessionId: id } })} />
+
+      {/* Subjects quick access */}
+      {subjects.length > 0 && (
+        <div className="rounded-lg border bg-card p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-foreground">Subjects</h3>
+            <button onClick={() => navigate('/subjects')} className="text-xs text-primary hover:underline">View all</button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {subjects.map(s => {
+              const color = getColorConfig(s.color);
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => navigate(`/subjects/${s.id}`)}
+                  className="flex items-center gap-2.5 rounded-lg border bg-background px-3 py-2.5 text-left hover:bg-secondary/30 transition-colors group"
+                >
+                  <div className={cn('w-2 h-2 rounded-full flex-shrink-0', color.bg)} />
+                  <span className="text-sm font-medium text-foreground truncate">{s.name}</span>
+                  <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/50 ml-auto flex-shrink-0 group-hover:text-muted-foreground transition-colors" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {isEmpty ? (
         <EmptyState onStart={() => navigate('/session')} userProfile={userProfile} updateProfile={updateProfile} />

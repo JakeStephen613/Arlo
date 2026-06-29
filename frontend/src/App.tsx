@@ -10,7 +10,8 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Session from "./pages/Session";
 import LibraryPage from "./pages/LibraryPage";
-
+import SubjectsPage from "./pages/SubjectsPage";
+import SubjectDetailPage from "./pages/SubjectDetailPage";
 import TutorDashboard from "./pages/TutorDashboard";
 import StudentSessionHistory from "./pages/StudentSessionHistory";
 import NotFound from "./pages/NotFound";
@@ -51,6 +52,22 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <AppShell><LibraryPage /></AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/subjects"
+              element={
+                <ProtectedRoute>
+                  <AppShell><SubjectsPage /></AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/subjects/:id"
+              element={
+                <ProtectedRoute>
+                  <AppShell><SubjectDetailPage /></AppShell>
                 </ProtectedRoute>
               }
             />
