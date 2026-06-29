@@ -481,50 +481,46 @@ function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfCo
       <div className="w-full max-w-xl mx-auto space-y-6">
 
         {/* Header */}
-        <div className="text-center space-y-1">
-          <h1 className="font-display text-3xl font-bold tracking-tight">What are you studying?</h1>
-          <p className="text-muted-foreground text-sm">Arlo will build a structured session plan for you.</p>
+        <div className="text-center">
+          <h1 className="font-display text-2xl font-bold tracking-tight">New session</h1>
         </div>
 
         {/* Main card */}
-        <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
+        <div className="rounded-2xl border bg-card shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/40 transition-all">
 
-          {/* Topic input */}
-          <div className="p-5 pb-4">
+          {/* Topic input — no inner border, card is the container */}
+          <div className="px-5 pt-5 pb-3">
             <textarea
               value={topic}
               onChange={e => setTopic(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && canSubmit) { e.preventDefault(); onSubmit(); } }}
-              placeholder="e.g. Cell Biology, Linear Algebra, French Revolution, Organic Chemistry..."
-              className="w-full bg-transparent text-foreground placeholder:text-muted-foreground/60 focus:outline-none text-base resize-none leading-relaxed"
+              placeholder="Topic, subject, or paste notes..."
+              className="w-full bg-transparent text-foreground placeholder:text-muted-foreground/40 focus:outline-none text-base resize-none leading-relaxed"
               rows={3}
               autoFocus
             />
           </div>
 
-          {/* Divider */}
-          <div className="border-t" />
-
-          {/* Toolbar row */}
-          <div className="flex items-center gap-2 px-4 py-3 flex-wrap">
+          {/* Subtle toolbar — no divider, just spacing */}
+          <div className="flex items-center gap-1.5 px-4 pb-4">
 
             {/* Subject picker */}
             <div className="relative">
               <button
                 onClick={() => setShowSubjectPicker(!showSubjectPicker)}
                 className={cn(
-                  'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                  'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
                   subjectId
-                    ? 'bg-primary/10 text-primary'
-                    : 'bg-secondary text-muted-foreground hover:text-foreground'
+                    ? 'text-primary bg-primary/8'
+                    : 'text-muted-foreground/70 hover:text-muted-foreground hover:bg-secondary'
                 )}
               >
                 <FolderOpen className="w-3.5 h-3.5" />
-                {subjectName ?? 'No subject'}
+                {subjectName ?? 'Subject'}
                 {subjectId && (
                   <button
                     onClick={e => { e.stopPropagation(); onSubjectChange(null, null); }}
-                    className="ml-0.5 hover:text-destructive"
+                    className="ml-0.5 opacity-60 hover:opacity-100"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -553,7 +549,7 @@ function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfCo
                       </button>
                     ))}
                     {subjects.length === 0 && (
-                      <p className="px-3 py-2 text-xs text-muted-foreground">No subjects yet. Create one in Subjects.</p>
+                      <p className="px-3 py-2 text-xs text-muted-foreground">No subjects yet.</p>
                     )}
                   </div>
                 </div>
@@ -562,19 +558,19 @@ function TopicInput({ topic, setTopic, duration, setDuration, onPdfParsed, pdfCo
 
             {/* PDF upload */}
             <label className={cn(
-              'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+              'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer',
               fileName
-                ? 'bg-primary/10 text-primary'
-                : 'bg-secondary text-muted-foreground hover:text-foreground'
+                ? 'text-primary bg-primary/8'
+                : 'text-muted-foreground/70 hover:text-muted-foreground hover:bg-secondary'
             )}>
               <Upload className="w-3.5 h-3.5" />
-              {uploading ? 'Parsing...' : fileName ? fileName : 'Upload PDF'}
+              {uploading ? 'Parsing…' : fileName ? fileName : 'PDF'}
               <input type="file" accept=".pdf" onChange={handleFileUpload} className="hidden" />
             </label>
             {fileName && (
               <button
                 onClick={() => { setFileName(null); onPdfParsed(null); }}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground/50 hover:text-muted-foreground"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
